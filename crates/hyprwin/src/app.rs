@@ -425,18 +425,25 @@ impl App {
         self.keep_floating_on_top(id);
     }
 
-    /// Hyprland keeps floating windows above tiled ones; activating a tiled
-    /// window on Windows raises it, so re-raise the floating ones.
+    /// Hyprland keeps floating windows above tiled ones. Activating a tiled
+    /// window on Windows raises it to the top, so slot it directly *below* the
+    /// lowest visible floating window instead. The request is queued on the
+    /// tiled window's own thread, after its activation, so it cannot race.
     fn keep_floating_on_top(&self, focused: WinId) {
         let Some(w) = self.wm.windows.get(&focused) else { return };
-        if w.floating {
+        if w.floating || self.wm.fullscreen_of(focused).is_some() {
             return;
         }
-        let ws = w.ws;
-        for f in self.wm.windows.values().filter(|x| x.floating && !x.minimized && (x.ws == ws || x.pinned)) {
-            unsafe {
-                let _ = SetWindowPos(hwnd(f.id), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-            }
+        let mon = self.wm.workspaces.get(&w.ws).map(|x| x.monitor);
+        let is_visible_float = |h: HWND| {
+            self.wm.windows.get(&id_of(h)).is_some_and(|f| {
+                f.floating && !f.minimized && self.wm.desired_rect(f.id).is_some() && self.wm.workspaces.get(&f.ws).map(|x| x.monitor) == mon
+            })
+        };
+        // Top-level windows are enumerated top to bottom: the last float found is the lowest.
+        let Some(lowest) = window::top_level_windows().into_iter().filter(|&h| is_visible_float(h)).last() else { return };
+        unsafe {
+            let _ = SetWindowPos(hwnd(focused), Some(lowest), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         }
     }
 
@@ -529,8 +536,8 @@ impl App {
                     // Still does not fit (too many windows for the screen): float it.
                     if let Some(d) = self.wm.desired_rect(id) {
                         if d.w + 2 < min.0 || d.h + 2 < min.1 {
-                            warn!("{:#x} cannot fit its minimum size here; floating it", id);
-                            let fx = self.wm.set_floating(Some(id), Some(true));
+                            warn!("{:#x} cannot fit its minimum size here; floating it until there is room", id);
+                            let fx = self.wm.auto_float(id);
                             self.apply(fx);
                         }
                     }

@@ -39,6 +39,12 @@ public static class K {
   public static string ForegroundClass() { var sb = new StringBuilder(256); GetClassName(GetForegroundWindow(), sb, 256); return sb.ToString(); }
   public static bool StartMenuOpen() { var c = ForegroundClass(); return c == "Windows.UI.Core.CoreWindow" || c == "XamlExplorerHostIslandWindow"; }
 }
+public static class Z {
+  delegate bool CB(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(CB cb, IntPtr l);
+  // Position in the top-to-bottom z-order (smaller = higher).
+  public static int Index(IntPtr target) { int i = 0, found = -1; EnumWindows((h, l) => { if (h == target) { found = i; return false; } i++; return true; }, IntPtr.Zero); return found; }
+}
 '@
 
 $script:fail = 0
@@ -124,6 +130,9 @@ try {
     Ctl dispatch togglefloating | Out-Null; Settle
     $c = Clients
     Check 'togglefloating' (($c | Where-Object { $_.title -eq 'hyprwin-test-1' }).floating -eq $true)
+    Ctl dispatch focuswindow title:hyprwin-test-0 | Out-Null; Settle
+    Check 'focusing a tiled window keeps the floating one above it' ([Z]::Index($h[1]) -lt [Z]::Index($h[0])) "float z=$([Z]::Index($h[1])) tiled z=$([Z]::Index($h[0]))"
+    Ctl dispatch focuswindow title:hyprwin-test-1 | Out-Null
     Ctl dispatch togglefloating | Out-Null
     Ctl dispatch fullscreen 0 | Out-Null; Settle
     $f = (Frame $h[1]).Split(',') | ForEach-Object { [int]$_ }

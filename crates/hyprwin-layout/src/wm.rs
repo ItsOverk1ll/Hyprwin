@@ -111,6 +111,9 @@ pub struct Win {
     pub natural: (i32, i32),
     /// Smallest visible frame the app accepts (learned at runtime).
     pub min_size: (i32, i32),
+    /// Floated by the WM because it did not fit (not by the user); it goes
+    /// back to tiling as soon as there is room.
+    pub auto_float: bool,
     // Last emitted state, for diffing.
     placed: Option<Rect>,
     shown: bool,
@@ -547,8 +550,24 @@ impl Wm {
             let win = self.windows.get_mut(&w).unwrap();
             win.ws = id;
             win.pinned = false;
+            // A window floated only because it did not fit gets another chance.
+            if win.auto_float {
+                win.floating = false;
+            }
         }
         self.attach(w, None);
+        if !self.windows[&w].floating {
+            if self.ws_fits(id) {
+                self.windows.get_mut(&w).unwrap().auto_float = false;
+            } else {
+                // Would squeeze something below its minimum: float until there is room.
+                self.detach(w);
+                let win = self.windows.get_mut(&w).unwrap();
+                win.floating = true;
+                win.auto_float = true;
+            }
+        }
+        self.retry_auto_floats(src);
         self.effects.push(Effect::Event { name: "movewindow", data: format!("{w:x},{name}") });
         self.effects.push(Effect::Event { name: "movewindowv2", data: format!("{w:x},{id},{name}") });
         if follow {
@@ -600,6 +619,7 @@ impl Wm {
                 minimized: false,
                 natural: (nw.rect.w, nw.rect.h),
                 min_size: (0, 0),
+                auto_float: false,
                 placed: None,
                 shown: true,
             },
@@ -652,6 +672,7 @@ impl Wm {
             let next = self.first_window_of(w.ws);
             self.set_focus(next);
         }
+        self.retry_auto_floats(w.ws);
         self.gc_workspaces();
         self.sync()
     }
@@ -707,6 +728,8 @@ impl Wm {
                 let next = self.first_window_of(ws);
                 self.set_focus(next);
             }
+            let ws = self.windows[&id].ws;
+            self.retry_auto_floats(ws);
         } else {
             self.windows.get_mut(&id).unwrap().minimized = false;
             self.attach(id, None);
@@ -1086,6 +1109,8 @@ impl Wm {
         if new == w.floating {
             return self.sync();
         }
+        // An explicit choice by the user overrides automatic floating.
+        self.windows.get_mut(&id).unwrap().auto_float = false;
         if new {
             let current = self.desired_rect(id).unwrap_or(w.float_rect);
             self.detach(id);
@@ -1102,8 +1127,56 @@ impl Wm {
             win.pinned = false;
             self.attach(id, None);
         }
+        if new {
+            // Floating this window freed space for others.
+            self.retry_auto_floats(w.ws);
+        }
         self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},{}", new as u8) });
         self.sync()
+    }
+
+    /// Floats a window that cannot fit its minimum size on its workspace. It
+    /// returns to tiling automatically when space frees up or when it is moved
+    /// to another workspace.
+    pub fn auto_float(&mut self, id: WinId) -> Vec<Effect> {
+        let Some(w) = self.windows.get(&id).cloned() else { return self.sync() };
+        if w.floating {
+            return self.sync();
+        }
+        self.detach(id);
+        let mon = self.workspaces.get(&w.ws).map(|x| x.monitor).unwrap_or(0).min(self.monitors.len() - 1);
+        let work = self.monitors[mon].spec.work;
+        let size = Rect::new(0, 0, w.min_size.0.max(w.natural.0).min(work.w), w.min_size.1.max(w.natural.1).min(work.h));
+        let win = self.windows.get_mut(&id).unwrap();
+        win.floating = true;
+        win.auto_float = true;
+        win.float_rect = center_in(size, work);
+        self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},1") });
+        self.sync()
+    }
+
+    /// True when every tiled window on `ws` gets at least its minimum size.
+    fn ws_fits(&self, ws: WsId) -> bool {
+        self.tiled_rects(ws).iter().all(|(id, r)| {
+            let m = self.windows.get(id).map(|w| w.min_size).unwrap_or((0, 0));
+            r.w + 2 >= m.0 && r.h + 2 >= m.1
+        })
+    }
+
+    /// Tries to tile auto-floated windows on `ws` again, one at a time.
+    fn retry_auto_floats(&mut self, ws: WsId) {
+        let candidates: Vec<WinId> = self.windows.values().filter(|w| w.ws == ws && w.auto_float && w.floating && !w.minimized).map(|w| w.id).collect();
+        for id in candidates {
+            self.windows.get_mut(&id).unwrap().floating = false;
+            self.attach(id, None);
+            if self.ws_fits(ws) {
+                self.windows.get_mut(&id).unwrap().auto_float = false;
+                self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},0") });
+            } else {
+                self.detach(id);
+                self.windows.get_mut(&id).unwrap().floating = true;
+            }
+        }
     }
 
     pub fn fullscreen(&mut self, mode: FullscreenMode, action: Option<bool>) -> Vec<Effect> {
@@ -1706,6 +1779,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn auto_floated_window_retiles_when_moved_or_when_room_frees_up() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        // Layout: 1 | (2 over 3). The right column is 1040px tall; 2 and 3
+        // together need 400 + 800 (+ gaps), so 3 cannot fit beside 2.
+        wm.set_min_size(2, 0, 400);
+        wm.set_min_size(3, 0, 800);
+        wm.auto_float(3);
+        assert!(wm.windows[&3].floating && wm.windows[&3].auto_float);
+        // Moving it to an empty workspace tiles it there.
+        wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
+        assert!(!wm.windows[&3].floating, "tiles on the new workspace");
+        assert!(!wm.windows[&3].auto_float);
+        // Back on ws 1 it does not fit, so it floats again (still automatic).
+        wm.move_to_workspace(Some(3), &WsSel::Id(1), false);
+        assert!(wm.windows[&3].floating && wm.windows[&3].auto_float);
+        // Closing window 2 frees enough room: it tiles by itself.
+        wm.remove_window(2);
+        assert!(!wm.windows[&3].floating);
+        assert!(wm.tiled_rects(1).iter().find(|x| x.0 == 3).unwrap().1.h >= 800);
+    }
+
+    #[test]
+    fn user_float_choice_is_never_undone() {
+        let mut wm = wm1();
+        wm.add_window(1, tiled(Rect::default()));
+        wm.add_window(2, tiled(Rect::default()));
+        wm.set_floating(Some(2), Some(true));
+        wm.move_to_workspace(Some(2), &WsSel::Id(3), false);
+        assert!(wm.windows[&2].floating);
     }
 
     #[test]
