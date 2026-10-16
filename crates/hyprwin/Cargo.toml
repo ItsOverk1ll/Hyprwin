@@ -1,0 +1,24 @@
+[package]
+name = "hyprwin"
+description = "hyprwin daemon: a Hyprland-style tiling window manager for Windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "hyprwin"
+path = "src/main.rs"
+
+[dependencies]
+hyprwin-anim.workspace = true
+hyprwin-config.workspace = true
+hyprwin-ipc.workspace = true
+hyprwin-layout.workspace = true
+hyprwin-win32.workspace = true
+windows.workspace = true
+serde_json = "1.0"
+regex = "1.13"
+
+[build-dependencies]
+embed-manifest = "1.4"

@@ -1,0 +1,10 @@
+[package]
+name = "hyprwin-ipc"
+description = "hyprwin named-pipe protocol (hyprctl-compatible requests, socket2-style events)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+windows.workspace = true

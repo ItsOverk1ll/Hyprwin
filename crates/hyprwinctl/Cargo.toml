@@ -1,0 +1,10 @@
+[package]
+name = "hyprwinctl"
+description = "hyprctl-compatible CLI for hyprwin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hyprwin-ipc.workspace = true

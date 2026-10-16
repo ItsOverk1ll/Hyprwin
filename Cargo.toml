@@ -12,6 +12,7 @@ repository = "https://github.com/hyprwin/hyprwin"
 [workspace.dependencies]
 hyprwin-anim = { path = "crates/hyprwin-anim" }
 hyprwin-config = { path = "crates/hyprwin-config" }
+hyprwin-ipc = { path = "crates/hyprwin-ipc" }
 hyprwin-layout = { path = "crates/hyprwin-layout" }
 hyprwin-win32 = { path = "crates/hyprwin-win32" }
 
@@ -21,6 +22,18 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_DirectComposition",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Power",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_UI_Accessibility",
     "Win32_System_Com",
     "Win32_System_Console",
     "Win32_System_LibraryLoader",

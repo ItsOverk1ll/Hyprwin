@@ -174,6 +174,10 @@ impl Ws {
     pub fn is_special(&self) -> bool {
         self.id < 0
     }
+    /// Tiled windows in layout order.
+    pub fn layout_windows(&self) -> Vec<WinId> {
+        self.layout.windows()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -690,6 +694,10 @@ impl Wm {
             let w = self.windows.get_mut(&id).unwrap();
             w.minimized = true;
             w.placed = None;
+            // The daemon uncloaks minimized windows immediately (a window that
+            // is both cloaked and minimized can vanish for good), so from the
+            // model's point of view it is shown again.
+            w.shown = true;
             if self.focus == Some(id) {
                 let ws = self.windows[&id].ws;
                 self.focus = None;
