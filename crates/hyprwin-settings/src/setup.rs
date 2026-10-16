@@ -174,7 +174,18 @@ pub fn install(opts: &InstallOptions) -> Result<String, String> {
         reg(&["delete", RUN_KEY, "/v", name(), "/f"]);
     }
     if was_running {
-        let _ = std::process::Command::new(&daemon).spawn();
+        // The old daemon may still be releasing its single-instance lock;
+        // a start that loses that race exits at once, so confirm and retry.
+        for _ in 0..4 {
+            let _ = std::process::Command::new(&daemon).spawn();
+            let t0 = Instant::now();
+            while t0.elapsed() < Duration::from_millis(2500) && hyprwin_ipc::request("status").is_err() {
+                std::thread::sleep(Duration::from_millis(150));
+            }
+            if hyprwin_ipc::request("status").is_ok() {
+                break;
+            }
+        }
     }
     let mut notes = Vec::new();
     if !(ok1 && ok2) {
