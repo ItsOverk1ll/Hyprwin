@@ -40,6 +40,36 @@ impl Color {
     }
 }
 
+/// `col.active_border = rgba(33ccffee) rgba(00ff99ee) 45deg`: one or more
+/// colours and an angle (degrees; 0 = left to right, 90 = bottom to top).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gradient {
+    pub colors: Vec<Color>,
+    pub angle_deg: f64,
+}
+
+impl Gradient {
+    pub fn parse(s: &str) -> Option<Gradient> {
+        let mut colors = Vec::new();
+        let mut angle_deg = 0.0;
+        for part in s.split_whitespace() {
+            if let Some(a) = part.strip_suffix("deg") {
+                angle_deg = a.parse().ok()?;
+            } else {
+                colors.push(Color::parse(part)?);
+            }
+        }
+        if colors.is_empty() {
+            return None;
+        }
+        Some(Gradient { colors, angle_deg })
+    }
+
+    pub fn solid(c: Color) -> Gradient {
+        Gradient { colors: vec![c], angle_deg: 0.0 }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BindFlags {
     pub locked: bool,
@@ -79,6 +109,8 @@ pub struct Config {
     pub wm: WmConfig,
     pub border_size: i32,
     pub col_active: Color,
+    /// The full `col.active_border` value (gradients are drawn by hyprwin).
+    pub active_gradient: Gradient,
     pub col_inactive: Color,
     pub rounding: u32,
     pub follow_mouse: u8,
@@ -114,6 +146,7 @@ impl Default for Config {
             wm: WmConfig::default(),
             border_size: 1,
             col_active: Color(0xEE33CCFF),
+            active_gradient: Gradient::solid(Color(0xEE33CCFF)),
             col_inactive: Color(0xAA595959),
             rounding: 0,
             follow_mouse: 1,
@@ -226,9 +259,7 @@ impl Config {
             "general:border_size" => self.border_size = int(v)?,
             "general:col.active_border" => {
                 self.col_active = color(v)?;
-                if v.split_whitespace().count() > 1 {
-                    self.warnings.push(format!("{src}: gradient borders are drawn with their first colour (DWM borders are solid)"));
-                }
+                self.active_gradient = Gradient::parse(v).ok_or_else(|| format!("bad colour '{v}'"))?;
             }
             "general:col.inactive_border" => self.col_inactive = color(v)?,
             "general:layout" => {
@@ -550,8 +581,9 @@ monitor=,preferred,auto,auto
         assert_eq!(c.window_rules.len(), 1);
         assert_eq!(c.animations["workspaces"].style.as_deref(), Some("slidevert"));
         assert!(c.beziers.contains_key("myBezier"));
-        // gradient + suppressevent + ignored group
-        assert!(c.warnings.iter().any(|w| w.contains("gradient")));
+        // Gradients are drawn now (no warning); suppressevent + blur still warn.
+        assert!(!c.warnings.iter().any(|w| w.contains("gradient")));
+        assert_eq!(c.active_gradient.colors.len(), 2);
         assert!(c.warnings.iter().any(|w| w.contains("suppressevent")));
         assert!(c.warnings.iter().any(|w| w.contains("decoration:blur")));
     }
@@ -597,5 +629,16 @@ monitor=,preferred,auto,auto
 }
 ");
         assert!(off.anim("windowsMove").is_none());
+    }
+
+    #[test]
+    fn gradient_border_parses() {
+        let c = Config::load_str("general {
+ col.active_border = rgba(33ccffee) rgba(00ff99ee) 45deg
+}
+");
+        assert_eq!(c.active_gradient.colors, vec![Color(0xEE33CCFF), Color(0xEE00FF99)]);
+        assert_eq!(c.active_gradient.angle_deg, 45.0);
+        assert_eq!(c.col_active, Color(0xEE33CCFF));
     }
 }

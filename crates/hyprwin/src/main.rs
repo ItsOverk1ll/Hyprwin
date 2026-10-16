@@ -10,6 +10,7 @@ mod classify;
 mod input;
 mod log;
 mod anim;
+mod border;
 mod shell;
 mod taskbar;
 mod tray;

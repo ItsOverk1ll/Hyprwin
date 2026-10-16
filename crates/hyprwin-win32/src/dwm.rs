@@ -62,6 +62,12 @@ pub fn set_border_color(hwnd: HWND, rgb: Option<u32>) -> windows::core::Result<(
     unsafe { DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &v as *const _ as *const c_void, 4) }
 }
 
+/// No DWM border at all (hyprwin draws its own).
+pub fn set_border_none(hwnd: HWND) -> windows::core::Result<()> {
+    const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
+    unsafe { DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &DWMWA_COLOR_NONE as *const _ as *const c_void, 4) }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Corners {
     Default,

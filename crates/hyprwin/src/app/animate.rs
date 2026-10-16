@@ -242,6 +242,7 @@ impl App {
             debug!("animation done in {} ms", t.elapsed().as_millis());
         }
         self.schedule_verify();
+        self.sync_border();
     }
 
     /// Stops animating and puts every window in its final state (pause, exit, reload).

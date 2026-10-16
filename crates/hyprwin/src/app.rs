@@ -79,6 +79,7 @@ pub struct App {
     taskbar_reveal: crate::taskbar::Reveal,
     /// Set while applying corrections that must not animate.
     anim_quiet: bool,
+    active_border: crate::border::ActiveBorder,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -145,6 +146,7 @@ impl App {
             anim_started: None,
             taskbar_reveal: Default::default(),
             anim_quiet: false,
+            active_border: Default::default(),
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -419,6 +421,7 @@ impl App {
             self.border_override.clear();
             self.drag = None;
             self.paused = true;
+            self.sync_border();
             self.install_binds();
             info!("paused: all windows handed back to Windows");
         } else {
@@ -543,6 +546,42 @@ impl App {
             }
         }
         self.start_animations(plan);
+        self.sync_border();
+    }
+
+    /// Puts the drawn border (thick or gradient) around the focused window,
+    /// or hides it when there is nothing to draw around.
+    pub fn sync_border(&mut self) {
+        if self.paused || !self.drawn_borders() {
+            self.active_border.hide();
+            return;
+        }
+        let Some(f) = self.wm.focus else {
+            self.active_border.hide();
+            return;
+        };
+        let h = hwnd(f);
+        let drawable = self.wm.windows.get(&f).is_some_and(|w| !w.minimized)
+            && self.wm.desired_rect(f).is_some()
+            && self.wm.fullscreen_of(f).is_none()
+            && !self.is_animating(f)
+            && !self.border_override.contains_key(&f)
+            && !self.ledger.hidden.contains_key(&(h.0 as isize))
+            && window::is_visible(h)
+            && !window::is_minimized(h);
+        let frame = if drawable { dwm::frame_bounds(h).ok() } else { None };
+        match frame {
+            Some(frame) => {
+                let scale = crate::border::scale_of(h);
+                let st = crate::border::Style {
+                    width: ((self.cfg.border_size as f64) * scale).round() as i32,
+                    radius: crate::border::corner_radius(self.cfg.rounding, scale),
+                    gradient: self.cfg.active_gradient.clone(),
+                };
+                self.active_border.show(h, frame, st);
+            }
+            None => self.active_border.hide(),
+        }
     }
 
     fn emit(&self, name: &str, data: &str) {
@@ -671,8 +710,17 @@ impl App {
         }
     }
 
+    fn drawn_borders(&self) -> bool {
+        self.cfg.border_size > 0 && crate::border::needed(self.cfg.border_size, &self.cfg.active_gradient)
+    }
+
     fn set_border(&self, id: WinId, active: bool) {
         if self.cfg.border_size <= 0 {
+            return;
+        }
+        if active && self.drawn_borders() && !self.border_override.contains_key(&id) {
+            // hyprwin draws this one (see sync_border).
+            let _ = dwm::set_border_none(hwnd(id));
             return;
         }
         let c = if active { self.border_override.get(&id).copied().unwrap_or(self.cfg.col_active.rgb()) } else { self.cfg.col_inactive.rgb() };
@@ -910,6 +958,7 @@ impl App {
                     let fx = self.wm.on_os_focus(id);
                     self.apply(fx);
                     self.keep_floating_on_top(id);
+                    self.sync_border();
                 } else {
                     self.try_manage(h);
                 }
@@ -973,6 +1022,9 @@ impl App {
             EVENT_OBJECT_LOCATIONCHANGE => {
                 if managed && !self.in_movesize.contains(&id) {
                     self.schedule_verify();
+                }
+                if managed && self.wm.focus == Some(id) {
+                    self.sync_border(); // follows the window while it is dragged
                 }
             }
             EVENT_OBJECT_NAMECHANGE => {

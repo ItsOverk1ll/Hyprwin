@@ -41,6 +41,23 @@ pub const BUILTIN: &[(&str, &str)] = &[
         "# name: Hyprland Default\n# author: hyprwin\n# description: Hyprland's stock cyan look.\ngeneral {\n    gaps_in = 5\n    gaps_out = 20\n    border_size = 2\n    col.active_border = rgba(33ccffee)\n    col.inactive_border = rgba(595959aa)\n}\ndecoration {\n    rounding = 10\n}\n",
     ),
     (
+        "hyprland-gradient",
+        "# name: Hyprland Gradient
+# author: hyprwin
+# description: Hyprland's signature cyan-to-green gradient border, 3 px.
+general {
+    gaps_in = 5
+    gaps_out = 20
+    border_size = 3
+    col.active_border = rgba(33ccffee) rgba(00ff99ee) 45deg
+    col.inactive_border = rgba(595959aa)
+}
+decoration {
+    rounding = 10
+}
+",
+    ),
+    (
         "catppuccin-mocha",
         "# name: Catppuccin Mocha\n# author: hyprwin\n# description: Soft mauve on dark, rounded and roomy.\ngeneral {\n    gaps_in = 6\n    gaps_out = 16\n    border_size = 2\n    col.active_border = rgba(cba6f7ff)\n    col.inactive_border = rgba(45475aff)\n}\ndecoration {\n    rounding = 10\n}\n",
     ),
