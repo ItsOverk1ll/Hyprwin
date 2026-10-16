@@ -16,7 +16,7 @@ pub mod themes;
 
 pub use dispatch::{Cmd, Delta};
 pub use keys::{Key, Mods};
-pub use model::{AnimEntry, Bind, BindFlags, Config, Color};
+pub use model::{AnimEntry, Bind, BindFlags, Color, Config, ResolvedAnim};
 pub use rules::{RuleEffect, WindowProps, WindowRule};
 
 /// The config shipped with hyprwin (Hyprland's defaults with Windows apps).

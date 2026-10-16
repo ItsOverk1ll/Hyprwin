@@ -9,10 +9,12 @@ mod app;
 mod classify;
 mod input;
 mod log;
+mod anim;
 mod shell;
 mod tray;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -114,6 +116,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             }
         }
         WM_APP_RELOAD => with_app(msg, w, l, |a| a.reload()),
+        anim::WM_APP_ANIM_DONE => with_app(msg, w, l, |a| a.on_anim_done(w.0 as u64)),
         tray::WM_APP_TRAY => {
             // NOTIFYICON_VERSION_4: the event is in the low word of lParam.
             let event = (l.0 as u32) & 0xFFFF;
@@ -244,24 +247,61 @@ pub fn load_config(path: &Path) -> Config {
     if path.exists() { Config::load_file(path) } else { Config::load_str(hyprwin_config::DEFAULT_CONFIG) }
 }
 
-fn watch_config(files: Vec<PathBuf>) {
-    let dirs: Vec<PathBuf> = {
-        let mut d: Vec<PathBuf> = files.iter().filter_map(|f| f.parent().map(Path::to_path_buf)).collect();
-        d.sort();
-        d.dedup();
-        d
-    };
+/// The config files currently in use (the main file and everything it
+/// sources). Updated on every reload, so files sourced later (a theme,
+/// settings.conf) are watched too.
+static WATCHED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static WATCHED_DIRS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+type Stamp = Option<(std::time::SystemTime, u64)>;
+
+fn stamps_in(dir: &Path) -> HashMap<PathBuf, Stamp> {
+    let files = WATCHED.lock().map(|w| w.clone()).unwrap_or_default();
+    files
+        .into_iter()
+        .filter(|f| f.parent() == Some(dir))
+        .map(|f| {
+            let s = std::fs::metadata(&f).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+            (f, s)
+        })
+        .collect()
+}
+
+/// Watches the folders of the config files. The folder notification fires for
+/// *any* file in it, so a reload is only requested when one of the config
+/// files itself changed, appeared or vanished.
+pub fn watch_config(files: Vec<PathBuf>) {
+    if let Ok(mut w) = WATCHED.lock() {
+        *w = files.clone();
+    }
+    let mut dirs: Vec<PathBuf> = files.iter().filter_map(|f| f.parent().map(Path::to_path_buf)).collect();
+    dirs.sort();
+    dirs.dedup();
     for dir in dirs {
+        {
+            let Ok(mut known) = WATCHED_DIRS.lock() else { continue };
+            if known.contains(&dir) {
+                continue;
+            }
+            known.push(dir.clone());
+        }
         std::thread::Builder::new()
             .name("hyprwin-config-watch".into())
             .spawn(move || unsafe {
                 let w = hyprwin_win32::wide(&dir.to_string_lossy());
                 let Ok(h) = FindFirstChangeNotificationW(PCWSTR(w.as_ptr()), false, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME) else { return };
+                let mut last = stamps_in(&dir);
                 loop {
                     WaitForSingleObject(h, INFINITE);
                     // Editors write in bursts; coalesce.
                     std::thread::sleep(Duration::from_millis(150));
-                    post(WM_APP_RELOAD, 0, 0);
+                    let now = stamps_in(&dir);
+                    // Files newly added to the list are recorded, not reloaded for.
+                    let changed = now.iter().any(|(f, s)| last.get(f).is_some_and(|old| old != s));
+                    last = now;
+                    if changed {
+                        post(WM_APP_RELOAD, 0, 0);
+                    }
                     if FindNextChangeNotification(h).is_err() {
                         break;
                     }

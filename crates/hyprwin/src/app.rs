@@ -19,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::classify::{self, Meta, Verdict};
 
+mod animate;
 mod groups;
 pub use groups::list as list_groups;
 use crate::input;
@@ -67,6 +68,13 @@ pub struct App {
     stubborn_until: HashMap<WinId, Instant>,
     pending_groups: Vec<groups::PendingGroup>,
     pub paused: bool,
+    animator: crate::anim::Animator,
+    anim_pending: HashMap<WinId, animate::Pending>,
+    /// Last target each window was animated to (re-sending it is a correction).
+    anim_target: HashMap<WinId, Rect>,
+    anim_active_ws: HashMap<hyprwin_layout::MonId, hyprwin_layout::WsId>,
+    anim_focus: Option<WinId>,
+    anim_started: Option<Instant>,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -125,6 +133,12 @@ impl App {
             stubborn_until: HashMap::new(),
             pending_groups: Vec::new(),
             paused: false,
+            animator: crate::anim::Animator::new(main),
+            anim_pending: HashMap::new(),
+            anim_target: HashMap::new(),
+            anim_active_ws: HashMap::new(),
+            anim_focus: None,
+            anim_started: None,
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -434,6 +448,8 @@ impl App {
         if !self.wm.windows.contains_key(&id) {
             return;
         }
+        self.anim_pending.remove(&id);
+        self.anim_target.remove(&id);
         let h = hwnd(id);
         if self.ledger.hidden.contains_key(&(h.0 as isize)) {
             self.reveal(id);
@@ -467,8 +483,19 @@ impl App {
             self.schedule_save();
         }
         let mut ledger_dirty = false;
+        let plan = self.plan_animations(&fx);
         for e in fx {
             match e {
+                Effect::Show(id) if plan.defer_show.contains(&id) => {}
+                Effect::Focus(id) if plan.defer_show.contains(&id) || self.anim_pending.get(&id).is_some_and(|p| p.reveal) => {
+                    // Focusing a still-cloaked window would make Windows switch
+                    // workspaces; focus it once it is revealed.
+                    self.anim_focus = Some(id);
+                }
+                Effect::Focus(id) => {
+                    self.anim_focus = None;
+                    self.focus(id);
+                }
                 Effect::Place { id, rect, anim } => self.place(id, rect, anim),
                 Effect::Hide(id) => {
                     self.hide(id);
@@ -478,7 +505,6 @@ impl App {
                     self.reveal(id);
                     ledger_dirty = true;
                 }
-                Effect::Focus(id) => self.focus(id),
                 Effect::Raise(id) => unsafe {
                     let _ = SetWindowPos(hwnd(id), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
                 },
@@ -508,6 +534,7 @@ impl App {
                 warn!("cannot save ledger: {e}");
             }
         }
+        self.start_animations(plan);
     }
 
     fn emit(&self, name: &str, data: &str) {
@@ -688,6 +715,10 @@ impl App {
                 self.unmanage(id);
                 continue;
             }
+            if self.is_animating(id) {
+                self.schedule_verify();
+                continue;
+            }
             if self.in_movesize.contains(&id) || self.drag.as_ref().is_some_and(|d| d.id == id) || self.stubborn.contains(&id) {
                 continue;
             }
@@ -840,6 +871,7 @@ impl App {
                 }
             }
             EVENT_SYSTEM_FOREGROUND => {
+                debug!("foreground -> {:#x} (managed={managed}, model focus={:?}, animating={})", id, self.wm.focus.map(|f| format!("{f:#x}")), self.anim_pending.len());
                 if managed {
                     let hidden_ws = self.wm.windows.get(&id).is_some_and(|w| self.wm.desired_rect(w.id).is_none() && !w.minimized);
                     if hidden_ws && self.restore_burst() {
@@ -1233,11 +1265,13 @@ impl App {
     }
 
     pub fn reload(&mut self) {
+        self.finish_animations_now();
         let cfg = crate::load_config(&self.cfg_path);
         for w in &cfg.warnings {
             warn!("config: {w}");
         }
         info!("config reloaded from {} ({} binds, {} rules, {} warnings)", self.cfg_path.display(), cfg.binds.len(), cfg.window_rules.len(), cfg.warnings.len());
+        crate::watch_config(cfg.files.clone());
         self.cfg = cfg;
         self.wm.cfg = self.cfg.wm.clone();
         self.install_binds();
@@ -1263,6 +1297,9 @@ impl App {
 
     /// Puts every window back the way we found it.
     pub fn restore_everything(&mut self) {
+        self.animator.cancel();
+        self.anim_pending.clear();
+        self.anim_target.clear();
         let n = self.ledger.restore_all();
         let _ = self.ledger.save();
         info!("restored {n} hidden window(s) and all styling");

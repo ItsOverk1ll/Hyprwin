@@ -59,7 +59,13 @@ function Frame($h) { $r = New-Object R; [void][W]::DwmGetWindowAttribute($h, 9, 
 function Cloaked($h) { $v = 0; [void][W]::DwmGetWindowAttribute($h, 14, [ref]$v, 4); $v }
 function Ctl { $out = & $ctl @args 2>&1; return ($out -join "`n") }
 function Clients { (Ctl -j clients) | ConvertFrom-Json }
-function Settle { Start-Sleep -Milliseconds 400 }
+# Waits for the change and any animation it started to finish.
+function Settle {
+    Start-Sleep -Milliseconds 150
+    $t0 = Get-Date
+    while ([W]::FindWindow("hyprwin.ghost", [NullString]::Value) -ne [IntPtr]::Zero -and ((Get-Date) - $t0).TotalMilliseconds -lt 3000) { Start-Sleep -Milliseconds 20 }
+    Start-Sleep -Milliseconds 250
+}
 
 # Clean slate.
 Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null }

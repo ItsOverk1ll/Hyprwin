@@ -192,6 +192,13 @@ impl Overlay {
         Ok(self.thumbs.len() - 1)
     }
 
+    /// Like [`set`](Self::set) with a new source crop (window-relative).
+    pub fn set_cropped(&self, idx: usize, screen: Rect, crop: Option<Rect>, opacity: u8) -> windows::core::Result<()> {
+        let (t, _) = &self.thumbs[idx];
+        let local = Rect::new(screen.x - self.origin.x, screen.y - self.origin.y, screen.w, screen.h);
+        t.update(local, crop, opacity, true)
+    }
+
     /// `screen` is in screen coordinates.
     pub fn set(&self, idx: usize, screen: Rect, opacity: u8) -> windows::core::Result<()> {
         let (t, crop) = &self.thumbs[idx];

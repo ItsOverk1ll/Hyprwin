@@ -3,13 +3,14 @@
 ## Automated
 
 ```powershell
-cargo test --workspace                                                # 76 unit tests (layout, config, animation, ledger)
+cargo test --workspace                                                # 102 unit tests (layout, config, animation, ledger)
 cargo build --release
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1                   # 36 live checks
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\overflow.ps1                 # min-size overflow to the next workspace
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\restart.ps1                  # layout survives clean exit and crash
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\minimize.ps1                 # show desktop / minimize storms keep the layout
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\ux.ps1                       # tray, themes, settings.conf, pause, App Groups (isolated APPDATA)
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\anim.ps1                     # animations: open, move, focus/borders kept, retarget, workspace switch, crash mid-animation, disabled
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update
 ```

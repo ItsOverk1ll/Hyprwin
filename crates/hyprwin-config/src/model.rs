@@ -418,6 +418,68 @@ pub fn normalize_monitor(s: &str) -> String {
     s.trim().trim_start_matches(r"\\.\").to_string()
 }
 
+/// A resolved `animation =` leaf: how long, which curve, which style.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedAnim {
+    pub duration_ms: f64,
+    pub curve: Bezier,
+    pub style: Option<String>,
+}
+
+/// Hyprland's animation tree: a leaf that is not set inherits from its parent.
+fn anim_parent(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "windowsIn" | "windowsOut" | "windowsMove" => "windows",
+        "workspacesIn" | "workspacesOut" | "specialWorkspace" => "workspaces",
+        "specialWorkspaceIn" | "specialWorkspaceOut" => "specialWorkspace",
+        "fadeIn" | "fadeOut" | "fadeSwitch" | "fadeShadow" | "fadeDim" | "fadeLayers" | "fadePopups" | "fadeDpms" => "fade",
+        "borderangle" => "border",
+        "windows" | "workspaces" | "fade" | "border" | "layers" | "zoomFactor" => "global",
+        _ => return None,
+    })
+}
+
+impl Config {
+    /// The animation to use for `name` (e.g. `windowsMove`), or `None` when
+    /// animations are off, the node (or the ancestor it inherits from) is
+    /// disabled, or its speed is 0.
+    pub fn anim(&self, name: &str) -> Option<ResolvedAnim> {
+        if !self.animations_enabled {
+            return None;
+        }
+        let mut node = name;
+        let entry = loop {
+            if let Some(e) = self.animations.get(node) {
+                break e.clone();
+            }
+            match anim_parent(node) {
+                Some(p) => node = p,
+                // Hyprland's built-in global: on, speed 8, default curve.
+                None => break AnimEntry { enabled: true, speed_ds: 8.0, curve: "default".into(), style: None },
+            }
+        };
+        if !entry.enabled || entry.speed_ds <= 0.0 {
+            return None;
+        }
+        // A style set higher up still applies to children that don't set one.
+        let style = entry.style.clone().or_else(|| {
+            let mut n = node;
+            while let Some(p) = anim_parent(n) {
+                if let Some(s) = self.animations.get(p).and_then(|e| e.style.clone()) {
+                    return Some(s);
+                }
+                n = p;
+            }
+            None
+        });
+        Some(ResolvedAnim {
+            duration_ms: hyprwin_anim::speed_to_ms(entry.speed_ds),
+            curve: self.beziers.get(&entry.curve).copied().unwrap_or(Bezier::HYPR_DEFAULT),
+            style,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,5 +576,26 @@ monitor=,preferred,auto,auto
         assert_eq!(c.wm.workspace_rules.len(), 2);
         assert_eq!(c.wm.workspace_rules[0].monitor.as_deref(), Some("DISPLAY2"));
         assert_eq!(c.wm.workspace_rules[1].layout, Some(LayoutKind::Master));
+    }
+    #[test]
+    fn animation_tree_inherits_and_disables() {
+        let c = Config::load_str("animations {
+ bezier = q, 0.1, 0.9, 0.1, 1
+ animation = windows, 1, 4, q, slide
+ animation = windowsIn, 1, 2, q, popin 80%
+ animation = workspaces, 0, 5, default
+}
+");
+        let m = c.anim("windowsMove").unwrap();
+        assert_eq!(m.duration_ms, 400.0);
+        assert_eq!(m.style.as_deref(), Some("slide"));
+        assert_eq!(c.anim("windowsIn").unwrap().style.as_deref(), Some("popin 80%"));
+        assert!(c.anim("workspacesIn").is_none(), "parent disabled");
+        assert_eq!(c.anim("fadeIn").unwrap().duration_ms, 800.0, "global default");
+        let off = Config::load_str("animations {
+ enabled = false
+}
+");
+        assert!(off.anim("windowsMove").is_none());
     }
 }

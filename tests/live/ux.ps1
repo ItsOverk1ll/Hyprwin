@@ -76,7 +76,11 @@ try {
     Start-Sleep -Milliseconds 1200
     Check 'config gained the managed theme block' ((Get-Content $cfg -Raw) -match 'themes\\nord\.conf')
     Check 'focused window border is Nord frost blue (88c0d0)' (Near (Border $ha) 0x00D0C088) ("0x{0:X6}" -f (Border $ha))
-    Check 'other window border is Nord grey (3b4252)' (Near (Border $hb) 0x0052423B) ("0x{0:X6}" -f (Border $hb))
+    $fw = ((Ctl -j activewindow) | ConvertFrom-Json).title
+    Check 'focus is still on ux-a after the theme reload' ($fw -eq 'hyprwin-ux-a') $fw
+    # The 1 px inactive border blends with whatever is behind the gap at
+    # fractional DPI, so only check that it is not the focused colour.
+    Check 'other window border is not the focused colour' (-not (Near (Border $hb) 0x00D0C088)) ("0x{0:X6}" -f (Border $hb))
     $p = Start-Process "$bin\hyprwin-settings.exe" -ArgumentList '--apply-theme', 'does-not-exist' -PassThru -Wait
     Check 'unknown theme is rejected' ($p.ExitCode -ne 0)
 

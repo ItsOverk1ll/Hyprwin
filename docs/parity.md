@@ -103,7 +103,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | rule effects `float`, `tile`, `fullscreen`, `maximize`, `pin`, `pseudo`, `center`, `size`, `move` (px/%), `workspace [silent]`, `monitor`, `noinitialfocus`, `nofocus`, `rounding`, `bordercolor` | ✅ | Applied when the window opens. Dynamic re-evaluation is ⏳ P3. |
 | `size`/`move` expressions (`monitor_w*0.5`) | ⏳ P3 | |
 | `opacity` | ⏳ P4 | Opt-in, via layered windows (can break some apps). |
-| `noanim`, `animation` | ⏳ P4 | |
+| `noanim`, `animation` | ⏳ | Window-rule overrides of animations are not applied yet. |
 | `idleinhibit`, `suppressevent`, `stayfocused`, `dimaround`, `noblur`, `noshadow`, … | 🟡 / ❌ | Warned. Some come in P3; blur and shadow are ❌. |
 | hyprwin extension `unmanaged` | ✅ | |
 | hyprwin option `hyprwin { force_tile = true }` | ✅ | Only real dialogs (owned windows, `#32770`) float automatically. Always-on-top, fixed-size and borderless windows tile too. `windowrule = match:class X, tile on` forces a single app. Apps that keep repositioning themselves stay tiled; hyprwin just pauses re-tiling them for 30 s instead of floating them. |
@@ -136,7 +136,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | active/inactive border colour | ✅ | `DWMWA_BORDER_COLOR`. |
 | border width, gradient borders | 🟡 | DWM borders are about 1 px and solid; a gradient uses its first colour. Overlay borders (any width/gradient) are ⏳ P4, cost to be measured. |
 | `rounding` | 🟡 | Snaps to Windows' presets: 0 → square, 1–5 → small (4 px), 6+ → round (8 px). Arbitrary radii are ❌. |
-| animations (`animation =`, `bezier =`) | ⏳ P4 | Parsed now. The engine (DWM-thumbnail overlay) is proven in `spikes/animation`: 240 Hz, 0 late frames. |
+| animations (`animation =`, `bezier =`) | ✅ | `windowsMove`, `windowsIn` (popin/slide/gnomed), `workspacesIn/Out` (slide/slidevert/fade/slidefade[vert]), inheritance through the animation tree, `animations:enabled`. Live DWM thumbnails on one click-through overlay at the monitor's refresh rate (242 fps measured); new changes retarget in-flight animations. Real windows move once, cloaked meanwhile (recorded in the crash ledger). Not yet: `windowsOut` (a closed window has no picture left), `fade*`, `border`/`borderangle`, `layers`, `specialWorkspace`. |
 | blur, shadows, dim on other apps | ❌ | DWM owns composition. Our own bar and overlays can use acrylic/mica. |
 | hide taskbar | ⏳ P4 | Recorded in the ledger, so it's always restored. |
 | `decoration:active_opacity` / `inactive_opacity` | ⏳ P4 | Opt-in. |
