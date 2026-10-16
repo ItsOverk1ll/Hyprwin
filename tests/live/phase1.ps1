@@ -39,6 +39,10 @@ public static class K {
   public static string ForegroundClass() { var sb = new StringBuilder(256); GetClassName(GetForegroundWindow(), sb, 256); return sb.ToString(); }
   public static bool StartMenuOpen() { var c = ForegroundClass(); return c == "Windows.UI.Core.CoreWindow" || c == "XamlExplorerHostIslandWindow"; }
 }
+public static class T {
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+}
 public static class Z {
   delegate bool CB(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumWindows(CB cb, IntPtr l);
@@ -133,6 +137,12 @@ try {
     Check 'togglefloating' (($c | Where-Object { $_.title -eq 'hyprwin-test-1' }).floating -eq $true)
     Ctl dispatch focuswindow title:hyprwin-test-0 | Out-Null; Settle
     Check 'focusing a tiled window keeps the floating one above it' ([Z]::Index($h[1]) -lt [Z]::Index($h[0])) "float z=$([Z]::Index($h[1])) tiled z=$([Z]::Index($h[0]))"
+    # Regression: an always-on-top floating window must never make the tiled one always-on-top.
+    [void][T]::SetWindowPos($h[1], [IntPtr](-1), 0, 0, 0, 0, 0x13)   # HWND_TOPMOST, NOMOVE|NOSIZE|NOACTIVATE
+    Ctl dispatch focuswindow title:hyprwin-test-1 | Out-Null; Settle
+    Ctl dispatch focuswindow title:hyprwin-test-0 | Out-Null; Settle
+    Check 'tiled window never inherits always-on-top' (([T]::GetWindowLong($h[0], -20) -band 0x8) -eq 0) "exstyle=0x$('{0:X}' -f [T]::GetWindowLong($h[0], -20))"
+    [void][T]::SetWindowPos($h[1], [IntPtr](-2), 0, 0, 0, 0, 0x13)   # HWND_NOTOPMOST
     Ctl dispatch focuswindow title:hyprwin-test-1 | Out-Null
     Ctl dispatch togglefloating | Out-Null
     Ctl dispatch fullscreen 0 | Out-Null; Settle

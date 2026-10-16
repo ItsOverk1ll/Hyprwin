@@ -60,6 +60,7 @@ pub struct App {
     pending_min: HashMap<WinId, (i32, i32)>,
     /// (count, window start) of recent restores, to spot mass restores.
     restores: (u32, Instant),
+    stubborn_until: HashMap<WinId, Instant>,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -115,6 +116,7 @@ impl App {
             in_movesize: HashSet::new(),
             pending_min: HashMap::new(),
             restores: (0, Instant::now()),
+            stubborn_until: HashMap::new(),
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -276,6 +278,9 @@ impl App {
         };
         self.initial.entry(id).or_insert_with(|| (m.class.clone(), m.title.clone()));
         let props = self.props_for(id, &m);
+        // force_tile: only real dialogs (owned windows, #32770) float on their own.
+        let is_dialog = matches!(reason, "owned window (dialog/palette)" | "dialog");
+        let float = float && (is_dialog || !self.cfg.force_tile);
         let mut nw = NewWindow {
             rect: dwm::frame_bounds(h).unwrap_or_default(),
             floating: float,
@@ -371,6 +376,7 @@ impl App {
         self.fights.remove(&id);
         self.pending_min.remove(&id);
         self.stubborn.remove(&id);
+        self.stubborn_until.remove(&id);
         self.meta.remove(&id);
         self.border_override.remove(&id);
         let fx = self.wm.remove_window(id);
@@ -532,15 +538,27 @@ impl App {
             return;
         }
         let mon = self.wm.workspaces.get(&w.ws).map(|x| x.monitor);
+        // Never use an always-on-top window as the anchor: Windows makes a
+        // window placed directly below a topmost one topmost too, which once
+        // turned tiled apps (Discord, Spotify) into always-on-top windows.
         let is_visible_float = |h: HWND| {
-            self.wm.windows.get(&id_of(h)).is_some_and(|f| {
-                f.floating && !f.minimized && self.wm.desired_rect(f.id).is_some() && self.wm.workspaces.get(&f.ws).map(|x| x.monitor) == mon
-            })
+            window::ex_style(h) & WS_EX_TOPMOST.0 == 0
+                && self.wm.windows.get(&id_of(h)).is_some_and(|f| {
+                    f.floating && !f.minimized && self.wm.desired_rect(f.id).is_some() && self.wm.workspaces.get(&f.ws).map(|x| x.monitor) == mon
+                })
         };
         // Top-level windows are enumerated top to bottom: the last float found is the lowest.
         let Some(lowest) = window::top_level_windows().into_iter().filter(|&h| is_visible_float(h)).last() else { return };
+        let h = hwnd(focused);
+        let was_topmost = window::ex_style(h) & WS_EX_TOPMOST.0 != 0;
         unsafe {
-            let _ = SetWindowPos(hwnd(focused), Some(lowest), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            // Synchronous (only z-order, no resize): we check the result below.
+            let _ = SetWindowPos(h, Some(lowest), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            // Belt and braces: we must never leave a window always-on-top.
+            if !was_topmost && window::ex_style(h) & WS_EX_TOPMOST.0 != 0 {
+                warn!("{:#x} became always-on-top while re-ordering; undoing", focused);
+                let _ = SetWindowPos(h, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
         }
     }
 
@@ -573,6 +591,19 @@ impl App {
         }
         let ids: Vec<WinId> = self.wm.windows.keys().copied().collect();
         let now = Instant::now();
+        // Pauses on stubborn apps expire: try tiling them again.
+        let expired: Vec<WinId> = self.stubborn_until.iter().filter(|(_, t)| now >= **t).map(|(id, _)| *id).collect();
+        for id in expired {
+            self.stubborn_until.remove(&id);
+            self.stubborn.remove(&id);
+            self.wm.invalidate(id);
+        }
+        if !self.stubborn_until.is_empty() {
+            unsafe {
+                SetTimer(Some(self.main), TIMER_VERIFY, 5000, None);
+            }
+            self.verify_pending = true;
+        }
         for id in ids {
             let h = hwnd(id);
             if !window::is_alive(h) {
@@ -666,11 +697,12 @@ impl App {
             }
             entry.0 += 1;
             if entry.0 > FIGHT_LIMIT {
-                warn!("{:#x} ({}) keeps repositioning itself; floating it", id, self.meta.get(&id).map(|m| m.class.as_str()).unwrap_or("?"));
+                // Keep it tiled; just stop fighting for a while so we never
+                // loop with an app that insists on its own geometry.
+                warn!("{:#x} ({}) keeps repositioning itself; pausing re-tiling it for 30 s", id, self.meta.get(&id).map(|m| m.class.as_str()).unwrap_or("?"));
                 self.stubborn.insert(id);
-                let fx = self.wm.set_floating(Some(id), Some(true));
-                self.stubborn.remove(&id);
-                self.apply(fx);
+                self.stubborn_until.insert(id, now + Duration::from_secs(30));
+                self.fights.remove(&id);
                 continue;
             }
             debug!("{:#x} drifted to {:?}, restoring {:?}", id, actual, desired);

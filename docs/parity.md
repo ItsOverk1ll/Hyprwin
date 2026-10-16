@@ -106,6 +106,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | `noanim`, `animation` | ⏳ P4 | |
 | `idleinhibit`, `suppressevent`, `stayfocused`, `dimaround`, `noblur`, `noshadow`, … | 🟡 / ❌ | Warned. Some come in P3; blur and shadow are ❌. |
 | hyprwin extension `unmanaged` | ✅ | |
+| hyprwin option `hyprwin { force_tile = true }` | ✅ | Only real dialogs (owned windows, `#32770`) float automatically. Always-on-top, fixed-size and borderless windows tile too. `windowrule = match:class X, tile on` forces a single app. Apps that keep repositioning themselves stay tiled; hyprwin just pauses re-tiling them for 30 s instead of floating them. |
 | `workspace =` rules (`monitor:`, `default:`, `persistent:`, `gapsin:`, `gapsout:`, `layout:`) | ✅ | |
 | `exec-once`, `exec`, `exec-shutdown`, `env` | ✅ | |
 | `monitor =` resolution/position/scale | ❌ | Set in Windows Display settings. `addreserved` is ✅. |

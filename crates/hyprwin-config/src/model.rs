@@ -98,6 +98,9 @@ pub struct Config {
     pub reserved: HashMap<String, (i32, i32, i32, i32)>,
     // hyprwin-specific (section `hyprwin { }`)
     pub hide_taskbar: bool,
+    /// `hyprwin:force_tile`: only real dialogs float automatically; windows
+    /// that are always-on-top, fixed-size or borderless popups tile too.
+    pub force_tile: bool,
     pub warnings: Vec<String>,
     pub files: Vec<std::path::PathBuf>,
 }
@@ -128,6 +131,7 @@ impl Default for Config {
             env: Vec::new(),
             reserved: HashMap::new(),
             hide_taskbar: true,
+            force_tile: false,
             warnings: Vec::new(),
             files: Vec::new(),
         }
@@ -321,6 +325,7 @@ impl Config {
             }
             "layerrule" | "permission" | "plugin" | "gesture" => ignored.push(e.key.clone()),
             "hyprwin:hide_taskbar" => self.hide_taskbar = boolean(v)?,
+            "hyprwin:force_tile" => self.force_tile = boolean(v)?,
             k if IGNORED_PREFIXES.iter().any(|p| k.starts_with(p)) => ignored.push(k.to_string()),
             k => return Err(format!("unknown option '{k}'")),
         }
