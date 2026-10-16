@@ -6,6 +6,8 @@
 #![windows_subsystem = "windows"]
 
 mod daemon;
+mod setup;
+mod setup_ui;
 mod ui;
 
 use eframe::egui;
@@ -56,6 +58,27 @@ fn main() -> eframe::Result {
             Err(_) => 1,
         };
         std::process::exit(code);
+    }
+    // Setup mode: run as hyprwin-setup.exe, or with --setup / --install / --uninstall.
+    let exe_name = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())).unwrap_or_default();
+    let quiet = args.iter().any(|a| a == "--quiet");
+    let uninstall = args.iter().any(|a| a == "--uninstall");
+    let install = args.iter().any(|a| a == "--install");
+    if quiet && (install || uninstall) {
+        let r = if uninstall {
+            setup::uninstall(args.iter().any(|a| a == "--purge"))
+        } else {
+            setup::install(&setup::InstallOptions { autostart: args.iter().any(|a| a == "--autostart") })
+        };
+        std::process::exit(if r.is_ok() { 0 } else { 1 });
+    }
+    if uninstall || install || args.iter().any(|a| a == "--setup") || exe_name.contains("setup") {
+        let mut viewport = egui::ViewportBuilder::default().with_title(setup_ui::TITLE).with_inner_size([640.0, 520.0]).with_resizable(false);
+        if let Some(icon) = window_icon() {
+            viewport = viewport.with_icon(icon);
+        }
+        let options = eframe::NativeOptions { viewport, ..Default::default() };
+        return eframe::run_native("hyprwin-setup", options, Box::new(move |cc| Ok(Box::new(setup_ui::SetupApp::new(cc, uninstall)))));
     }
     if already_open() {
         return Ok(());

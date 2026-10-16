@@ -78,6 +78,44 @@ pub fn update(main: HWND, paused: bool) {
     }
 }
 
+/// Shows a notification from the tray icon (a Windows toast).
+pub fn notify(main: HWND, title: &str, text: &str) {
+    let mut nid = NOTIFYICONDATAW {
+        cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: main,
+        uID: TRAY_ID,
+        uFlags: windows::Win32::UI::Shell::NIF_INFO,
+        dwInfoFlags: windows::Win32::UI::Shell::NIIF_USER | windows::Win32::UI::Shell::NIIF_LARGE_ICON,
+        ..Default::default()
+    };
+    for (i, c) in title.encode_utf16().take(nid.szInfoTitle.len() - 1).enumerate() {
+        nid.szInfoTitle[i] = c;
+    }
+    for (i, c) in text.encode_utf16().take(nid.szInfo.len() - 1).enumerate() {
+        nid.szInfo[i] = c;
+    }
+    nid.hBalloonIcon = icon_from_ico(TRAY_ICO, 32).unwrap_or_default();
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+    }
+}
+
+/// On the very first start, tells the user where hyprwin lives and how to
+/// get out. Remembered with a marker file in the state folder.
+pub fn welcome_once(main: HWND) {
+    let marker = hyprwin_win32::ledger::state_dir().join("welcomed");
+    // Live tests run with a fresh state folder and a manage filter: no toasts.
+    if marker.exists() || std::env::var_os("HYPRWIN_MANAGE_ONLY").is_some() {
+        return;
+    }
+    let _ = std::fs::write(&marker, "");
+    notify(
+        main,
+        "hyprwin is tiling your windows",
+        "Right-click the hyprwin tray icon for Settings, Themes and Pause. Super+Q opens a terminal. Emergency exit: Ctrl+Alt+Shift+Win+Esc.",
+    );
+}
+
 pub fn remove(main: HWND) {
     let nid = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: main, uID: TRAY_ID, ..Default::default() };
     unsafe {

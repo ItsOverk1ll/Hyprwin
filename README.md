@@ -4,20 +4,47 @@ hyprwin is a Hyprland-style tiling window manager for Windows 11: same keybinds,
 
 It's a small native Rust daemon that runs on top of Explorer. It doesn't install drivers, inject DLLs or patch system files.
 
-> Status: **Phase 1 done** (core tiling, workspaces, config, IPC, crash safety). Animations, taskbar hiding and the bar come next. See [docs/parity.md](docs/parity.md).
+> Status: tiling, workspaces, animations, themes, App Groups, taskbar hiding, a Settings window and an installer all work. See [docs/parity.md](docs/parity.md) for exactly what matches Hyprland.
 
-## Quick start
+## Install (no admin rights needed)
+
+1. Download `hyprwin-<version>-windows-x64.zip` and unzip it.
+2. Double-click **hyprwin-setup.exe** and press **Install**.
+3. hyprwin starts and shows a notification. Its icon sits in the system tray.
+
+Uninstall from **Windows Settings › Apps › Installed apps › hyprwin**. Your config, themes and groups are kept unless you tick the box to delete them.
+
+**Emergency exit: Ctrl + Alt + Shift + Win + Esc.** This restores every window and the taskbar, then quits. It always works and can't be unbound. If hyprwin is killed or crashes, `hyprwin-guard` puts everything back.
+
+## First steps
+
+| Keys | Does |
+|---|---|
+| Super + Q | open a terminal |
+| Super + C | close the focused window |
+| Super + arrows | move focus |
+| Super + Shift + arrows | move the window |
+| Super + 1…9 | switch workspace |
+| Super + Shift + 1…9 | move the window to a workspace |
+| Super + V | float / tile the window |
+| Super + F | fullscreen |
+| Super + Alt + P | pause / resume tiling |
+| Super + Alt + B | hide / show the taskbar |
+| Super + left-drag / right-drag | move / resize with the mouse |
+
+The full list is in the Settings window (Keybinds tab).
+
+## Build from source
 
 ```powershell
 cargo build --release
 .\target\release\hyprwin.exe          # writes %APPDATA%\hyprwin\hyprland.conf on first run
 .\target\release\hyprwinctl.exe clients
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package.ps1   # builds dist\hyprwin-<version>-windows-x64.zip
 ```
 
 - Config: `%USERPROFILE%\.config\hypr\hyprland.conf`, else `%APPDATA%\hyprwin\hyprland.conf`. It hot-reloads on save.
 - Log: `%LOCALAPPDATA%\hyprwin\hyprwin.log` (`HYPRWIN_LOG=debug` for more detail).
-- **Emergency exit: Ctrl + Alt + Shift + Win + Esc.** This restores every window and quits. It's hard-coded and can't be unbound.
-- If hyprwin is killed or crashes, `hyprwin-guard` puts every hidden window back.
 
 ## For everyone: the tray icon
 

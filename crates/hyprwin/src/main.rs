@@ -480,6 +480,7 @@ fn main() {
     spawn_guard();
     hyprwin_config::themes::install_builtins();
     tray::add(main, false);
+    tray::welcome_once(main);
     info!("ready");
 
     let mut msg = MSG::default();
