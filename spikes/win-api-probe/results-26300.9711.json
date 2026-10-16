@@ -1,0 +1,25 @@
+{
+    "os":  "Microsoft Windows 11 Home 10.0.26300 build 26300",
+    "ubr":  9711,
+    "displayVersion":  "26H2",
+    "windowRect":  "180,180,780,630",
+    "extendedFrameBounds":  "191,180,769,619",
+    "invisibleBorder_LTRB":  "11,0,11,11",
+    "visibleBeforeCloak":  true,
+    "borderColorHr":  "0x00000000",
+    "cornerPrefHr":  "0x00000000",
+    "dwmCloakForeignHr":  "0x80070005",
+    "appViewCloakHr":  "0x00000000",
+    "dwmwaCloakedAfter":  2,
+    "visibleWhileCloaked":  false,
+    "thumbRegisterHr":  "0x00000000",
+    "thumbUpdateHr":  "0x00000000",
+    "thumbnailOfCloakedRendersRed":  true,
+    "thumbUpdate120x_ms":  14.299100000000001,
+    "setWindowPos60x_ms":  25.6151,
+    "uncloakHr":  "0x00000000",
+    "cloakedAfterRestore":  0,
+    "registeredShellIIDs":  {
+
+                            }
+}
