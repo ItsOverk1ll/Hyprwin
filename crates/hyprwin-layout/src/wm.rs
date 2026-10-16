@@ -114,6 +114,8 @@ pub struct Win {
     /// Floated by the WM because it did not fit (not by the user); it goes
     /// back to tiling as soon as there is room.
     pub auto_float: bool,
+    /// Order in which windows were added (newest = largest).
+    pub seq: u64,
     // Last emitted state, for diffing.
     placed: Option<Rect>,
     shown: bool,
@@ -620,6 +622,7 @@ impl Wm {
                 natural: (nw.rect.w, nw.rect.h),
                 min_size: (0, 0),
                 auto_float: false,
+                seq: self.windows.values().map(|w| w.seq).max().unwrap_or(0) + 1,
                 placed: None,
                 shown: true,
             },
@@ -1153,6 +1156,90 @@ impl Wm {
         win.float_rect = center_in(size, work);
         self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},1") });
         self.sync()
+    }
+
+    /// A window that cannot fit its minimum size where it is: move it (silently)
+    /// to the next workspace on the same monitor where everything still fits,
+    /// creating one if needed. Falls back to floating when it fits nowhere,
+    /// not even alone. Returns the workspace it went to, if it moved.
+    pub fn overflow(&mut self, id: WinId) -> (Vec<Effect>, Option<WsId>) {
+        let Some(w) = self.windows.get(&id).cloned() else { return (self.sync(), None) };
+        if w.floating || w.ws < 0 {
+            return (self.sync(), None);
+        }
+        let src = w.ws;
+        let mon = self.workspaces.get(&src).map(|x| x.monitor).unwrap_or(self.focused_monitor);
+        let was_focused = self.focus == Some(id);
+        for n in (src + 1)..(src + 100) {
+            // Skip workspaces that live on (or are shown on) another monitor.
+            if let Some(ws) = self.workspaces.get(&n) {
+                if ws.monitor != mon {
+                    continue;
+                }
+            }
+            let existed = self.workspaces.contains_key(&n);
+            let fx_mark = self.effects.len();
+            self.ensure_ws(n, None, mon);
+            self.detach(id);
+            self.windows.get_mut(&id).unwrap().ws = n;
+            self.attach(id, None);
+            if self.ws_fits(n) {
+                let name = self.workspaces[&n].name.clone();
+                self.effects.push(Effect::Event { name: "movewindow", data: format!("{id:x},{name}") });
+                self.effects.push(Effect::Event { name: "movewindowv2", data: format!("{id:x},{n},{name}") });
+                if was_focused {
+                    self.focus = self.first_window_of(src);
+                }
+                self.gc_workspaces();
+                return (self.sync(), Some(n));
+            }
+            // Undo the trial.
+            self.detach(id);
+            self.windows.get_mut(&id).unwrap().ws = src;
+            if !existed {
+                // Drop the trial workspace and its creation event. An empty
+                // workspace was not enough, so it fits nowhere: stop looking.
+                self.workspaces.remove(&n);
+                self.effects.truncate(fx_mark);
+                break;
+            }
+        }
+        self.attach(id, None);
+        (self.auto_float(id), None)
+    }
+
+    /// Makes workspace `ws` fit again by moving its most recently opened tiled
+    /// windows, newest first, to the next workspace with room. The windows that
+    /// were there first stay put. Returns each move as (window, workspace).
+    pub fn overflow_ws(&mut self, ws: WsId) -> (Vec<Effect>, Vec<(WinId, Option<WsId>)>) {
+        let mut moved = Vec::new();
+        let mut fx = Vec::new();
+        for _ in 0..16 {
+            if self.ws_fits(ws) {
+                break;
+            }
+            let tiled = self.workspaces.get(&ws).map(|w| w.layout.windows()).unwrap_or_default();
+            if tiled.len() <= 1 {
+                break;
+            }
+            let Some(victim) = tiled.into_iter().max_by_key(|id| self.windows[id].seq) else { break };
+            let (f, to) = self.overflow(victim);
+            fx.extend(f);
+            moved.push((victim, to));
+        }
+        fx.extend(self.sync());
+        (fx, moved)
+    }
+
+    /// Sets the "age" order of windows, oldest first. Used at startup so the
+    /// windows the user touched most recently count as the oldest and are
+    /// the last to be moved away by [`overflow_ws`](Self::overflow_ws).
+    pub fn set_age_order(&mut self, oldest_first: &[WinId]) {
+        for (i, id) in oldest_first.iter().enumerate() {
+            if let Some(w) = self.windows.get_mut(id) {
+                w.seq = i as u64 + 1;
+            }
+        }
     }
 
     /// True when every tiled window on `ws` gets at least its minimum size.
@@ -1804,6 +1891,67 @@ mod tests {
         wm.remove_window(2);
         assert!(!wm.windows[&3].floating);
         assert!(wm.tiled_rects(1).iter().find(|x| x.0 == 3).unwrap().1.h >= 800);
+    }
+
+    #[test]
+    fn overflow_moves_to_next_workspace_that_fits() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        // Workspace 2 already has a wide window; 3 cannot fit beside it either.
+        wm.move_to_workspace(Some(1), &WsSel::Id(2), false);
+        wm.set_min_size(1, 1500, 0);
+        wm.set_min_size(3, 1500, 0);
+        let (_, to) = wm.overflow(3);
+        assert_eq!(to, Some(3), "skips full ws 2, creates ws 3");
+        assert_eq!(wm.windows[&3].ws, 3);
+        assert!(!wm.windows[&3].floating);
+        assert_eq!(wm.active_workspace(), 1, "user is not moved");
+        assert!(!wm.windows[&3].shown, "hidden on the inactive workspace");
+    }
+
+    #[test]
+    fn overflow_ws_evicts_the_newest_window_not_the_squeezed_one() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        // Layout is 1 | (2 over 3) in an 1880px-wide area. 1 and 2 (900px each)
+        // fit side by side; 3 needs 1000px in the right column, which does not.
+        wm.set_min_size(1, 900, 0);
+        wm.set_min_size(2, 900, 0);
+        wm.set_min_size(3, 1000, 0);
+        let (_, moved) = wm.overflow_ws(1);
+        assert_eq!(moved, vec![(3, Some(2))]);
+        assert_eq!(wm.windows[&1].ws, 1);
+        assert_eq!(wm.windows[&2].ws, 1);
+    }
+
+    #[test]
+    fn overflow_uses_existing_workspace_with_room() {
+        let mut wm = wm1();
+        wm.add_window(1, tiled(Rect::default()));
+        wm.add_window(2, tiled(Rect::default()));
+        wm.add_window(3, tiled(Rect::default()));
+        wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
+        wm.set_min_size(2, 1200, 0);
+        let (_, to) = wm.overflow(2);
+        assert_eq!(to, Some(2));
+        assert_eq!(wm.workspaces[&2].layout_windows().len(), 2);
+    }
+
+    #[test]
+    fn overflow_floats_when_it_fits_nowhere() {
+        let mut wm = wm1();
+        wm.add_window(1, tiled(Rect::default()));
+        wm.add_window(2, tiled(Rect::default()));
+        wm.set_min_size(2, 5000, 0);
+        let (_, to) = wm.overflow(2);
+        assert_eq!(to, None);
+        assert!(wm.windows[&2].floating && wm.windows[&2].auto_float);
+        assert_eq!(wm.windows[&2].ws, 1);
+        assert!(!wm.workspaces.contains_key(&2), "trial workspace cleaned up");
     }
 
     #[test]

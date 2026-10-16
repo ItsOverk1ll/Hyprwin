@@ -313,16 +313,34 @@ fn print_stats(name: &str, s: &Stats, expected: f64) {
 
 // ---------------------------------------------------------------- target windows (child processes)
 
+/// Optional minimum outer size for test windows (like Steam/Discord enforce).
+static TARGET_MIN: std::sync::OnceLock<(i32, i32)> = std::sync::OnceLock::new();
+
 unsafe extern "system" fn target_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if m == WM_DESTROY {
         unsafe { PostQuitMessage(0) };
         return LRESULT(0);
     }
+    if m == WM_GETMINMAXINFO {
+        if let Some(&(mw, mh)) = TARGET_MIN.get() {
+            let mmi = unsafe { &mut *(l.0 as *mut MINMAXINFO) };
+            mmi.ptMinTrackSize.x = mw;
+            mmi.ptMinTrackSize.y = mh;
+            return LRESULT(0);
+        }
+    }
     unsafe { DefWindowProcW(h, m, w, l) }
 }
 
+/// `target R,G,B X Y W H TITLE [MINW,MINH]`
 fn run_target(args: &[String]) {
     dpi::make_per_monitor_aware();
+    if let Some(min) = args.get(6) {
+        let v: Vec<i32> = min.split(',').filter_map(|x| x.parse().ok()).collect();
+        if v.len() == 2 {
+            TARGET_MIN.set((v[0], v[1])).ok();
+        }
+    }
     let rgb: Vec<u32> = args[0].split(',').map(|x| x.parse().unwrap()).collect();
     let n: Vec<i32> = args[1..5].iter().map(|x| x.parse().unwrap()).collect();
     let title = hyprwin_win32::wide(&args[5]);

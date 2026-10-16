@@ -124,6 +124,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | `binds:workspace_back_and_forth` | ✅ | |
 | monitor hotplug / resolution / DPI change | ✅ | Workspaces move to a remaining monitor. Re-detected on `WM_DISPLAYCHANGE`/`WM_DPICHANGED`/work-area change/resume. |
 | persist layout across daemon restarts | ⏳ P2 | |
+| apps with a minimum size (Steam, Discord, Spotify, Chromium) | ✅ (hyprwin extension) | Learned when Windows clamps a resize, confirmed on a second attempt. Dwindle split lines move so every window gets its minimum. If a workspace still can't fit everything, its most recently opened windows move silently to the next workspace on that monitor with room. At startup, the least recently used windows move first. A window that fits nowhere, even alone, floats. Windows you move yourself onto a full workspace float there and re-tile when room frees up. Hyprland has no equivalent; Linux apps usually shrink freely. |
 | mixed-DPI multi-monitor | ✅ (model) / ⏳ (manual test) | |
 
 ## Look & feel

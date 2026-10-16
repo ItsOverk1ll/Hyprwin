@@ -136,11 +136,14 @@ impl App {
     /// Manages every existing window, bottom of the z-order first so the
     /// top-most window ends up focused.
     pub fn manage_existing(&mut self) {
-        let mut all = window::top_level_windows();
-        all.reverse();
-        for h in all {
+        let top_first = window::top_level_windows();
+        for &h in top_first.iter().rev() {
             self.try_manage(h);
         }
+        // The top of the z-order is what the user used last: treat it as the
+        // oldest, so overflow moves the least recently used windows first.
+        let order: Vec<WinId> = top_first.iter().map(|&h| id_of(h)).collect();
+        self.wm.set_age_order(&order);
         if let Some(fg) = Some(unsafe { GetForegroundWindow() }).filter(|h| !h.is_invalid()) {
             let fx = self.wm.on_os_focus(id_of(fg));
             self.apply(fx);
@@ -536,8 +539,14 @@ impl App {
                     // Still does not fit (too many windows for the screen): float it.
                     if let Some(d) = self.wm.desired_rect(id) {
                         if d.w + 2 < min.0 || d.h + 2 < min.1 {
-                            warn!("{:#x} cannot fit its minimum size here; floating it until there is room", id);
-                            let fx = self.wm.auto_float(id);
+                            let ws = self.wm.windows[&id].ws;
+                            let (fx, moved) = self.wm.overflow_ws(ws);
+                            for (w, to) in moved {
+                                match to {
+                                    Some(n) => info!("{:#x} has no room on workspace {ws}; moved it to workspace {n}", w),
+                                    None => warn!("{:#x} fits on no workspace (larger than the screen); floating it", w),
+                                }
+                            }
                             self.apply(fx);
                         }
                     }
