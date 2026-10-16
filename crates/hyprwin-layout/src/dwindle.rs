@@ -232,7 +232,29 @@ impl Dwindle {
 
     /// Raw window boxes (no inner gaps) for `area`.
     pub fn layout(&self, area: Rect, cfg: &DwindleConfig) -> Vec<(WinId, Rect)> {
-        let boxes = self.node_boxes(area, cfg);
+        self.layout_min(area, cfg, &|_| (0, 0))
+    }
+
+    /// Like [`layout`](Self::layout), but split lines move so every window gets
+    /// at least `min(win)` where the area allows it (Windows apps often refuse
+    /// to shrink below a minimum size). Split directions are decided exactly as
+    /// without minimums, so they never flip because of a constraint.
+    pub fn layout_min(&self, area: Rect, cfg: &DwindleConfig, min: &dyn Fn(WinId) -> (i32, i32)) -> Vec<(WinId, Rect)> {
+        let raw = self.node_boxes(area, cfg);
+        let mut dirs = std::collections::HashMap::new();
+        for (&n, &b) in &raw {
+            if let Kind::Split { split_top, locked, .. } = &self.node(n).kind {
+                dirs.insert(n, if *locked { *split_top } else { self.effective_split_top(*split_top, b, cfg) });
+            }
+        }
+        let mut mins = std::collections::HashMap::new();
+        if let Some(r) = self.root {
+            self.subtree_min(r, &dirs, min, &mut mins);
+        }
+        let mut boxes = std::collections::HashMap::new();
+        if let Some(r) = self.root {
+            self.walk_min(r, area, &dirs, &mins, &mut boxes);
+        }
         let mut out: Vec<(WinId, Rect)> = boxes
             .iter()
             .filter_map(|(&n, &r)| match self.node(n).kind {
@@ -243,6 +265,56 @@ impl Dwindle {
         let order = self.windows();
         out.sort_by_key(|(w, _)| order.iter().position(|x| x == w));
         out
+    }
+
+    fn subtree_min(
+        &self,
+        n: NodeId,
+        dirs: &std::collections::HashMap<NodeId, bool>,
+        min: &dyn Fn(WinId) -> (i32, i32),
+        out: &mut std::collections::HashMap<NodeId, (i32, i32)>,
+    ) -> (i32, i32) {
+        let m = match &self.node(n).kind {
+            Kind::Leaf(w) => min(*w),
+            Kind::Split { children, .. } => {
+                let a = self.subtree_min(children[0], dirs, min, out);
+                let b = self.subtree_min(children[1], dirs, min, out);
+                if dirs[&n] { (a.0.max(b.0), a.1 + b.1) } else { (a.0 + b.0, a.1.max(b.1)) }
+            }
+        };
+        out.insert(n, m);
+        m
+    }
+
+    fn walk_min(
+        &self,
+        n: NodeId,
+        b: Rect,
+        dirs: &std::collections::HashMap<NodeId, bool>,
+        mins: &std::collections::HashMap<NodeId, (i32, i32)>,
+        out: &mut std::collections::HashMap<NodeId, Rect>,
+    ) {
+        out.insert(n, b);
+        if let Kind::Split { children, ratio, .. } = &self.node(n).kind {
+            let top = dirs[&n];
+            let extent = if top { b.h } else { b.w };
+            let pick = |m: (i32, i32)| if top { m.1 } else { m.0 };
+            let (ma, mb) = (pick(mins[&children[0]]), pick(mins[&children[1]]));
+            let mut first = (extent as f64 * ratio / 2.0).round() as i32;
+            if ma + mb <= extent {
+                first = first.clamp(ma, extent - mb);
+            } else if ma + mb > 0 {
+                // Both cannot fit: share the shortfall in proportion.
+                first = (extent as f64 * ma as f64 / (ma + mb) as f64).round() as i32;
+            }
+            let (a, c) = if top {
+                (Rect::new(b.x, b.y, b.w, first), Rect::new(b.x, b.y + first, b.w, b.h - first))
+            } else {
+                (Rect::new(b.x, b.y, first, b.h), Rect::new(b.x + first, b.y, b.w - first, b.h))
+            };
+            self.walk_min(children[0], a, dirs, mins, out);
+            self.walk_min(children[1], c, dirs, mins, out);
+        }
     }
 
     /// `layoutmsg togglesplit`. Only meaningful with `preserve_split`, as in Hyprland.
@@ -443,6 +515,31 @@ mod tests {
         assert_eq!(d.windows(), vec![2, 1]);
         d.swap(1, 2);
         assert_eq!(d.windows(), vec![1, 2]);
+    }
+
+    #[test]
+    fn minimum_sizes_move_split_lines() {
+        let mut d = Dwindle::default();
+        d.insert(1, None, None, AREA, &cfg());
+        d.insert(2, Some(1), None, AREA, &cfg());
+        d.insert(3, Some(2), None, AREA, &cfg());
+        // Window 3 (bottom-right) refuses to be narrower than 1000px.
+        let l = d.layout_min(AREA, &cfg(), &|w| if w == 3 { (1000, 0) } else { (0, 0) });
+        let r = |w| l.iter().find(|x| x.0 == w).unwrap().1;
+        assert_eq!(r(3).w, 1000);
+        assert_eq!(r(1).w, 600);
+        let total: i64 = l.iter().map(|(_, r)| r.w as i64 * r.h as i64).sum();
+        assert_eq!(total, AREA.w as i64 * AREA.h as i64);
+    }
+
+    #[test]
+    fn impossible_minimums_share_space_proportionally() {
+        let mut d = Dwindle::default();
+        d.insert(1, None, None, AREA, &cfg());
+        d.insert(2, Some(1), None, AREA, &cfg());
+        let l = d.layout_min(AREA, &cfg(), &|_| (1200, 0));
+        assert_eq!(l[0].1.w, 800);
+        assert_eq!(l[1].1.w, 800);
     }
 
     #[test]

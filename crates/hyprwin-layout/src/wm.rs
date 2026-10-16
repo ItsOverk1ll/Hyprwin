@@ -109,6 +109,8 @@ pub struct Win {
     pub minimized: bool,
     /// Preferred size for pseudotiling (the window's own size when it opened).
     pub natural: (i32, i32),
+    /// Smallest visible frame the app accepts (learned at runtime).
+    pub min_size: (i32, i32),
     // Last emitted state, for diffing.
     placed: Option<Rect>,
     shown: bool,
@@ -597,6 +599,7 @@ impl Wm {
                 pseudo: nw.pseudo,
                 minimized: false,
                 natural: (nw.rect.w, nw.rect.h),
+                min_size: (0, 0),
                 placed: None,
                 shown: true,
             },
@@ -811,11 +814,19 @@ impl Wm {
         let Some(w) = self.workspaces.get(&ws) else { return Vec::new() };
         let area = self.layout_area(ws);
         let gin = self.gaps_in(ws);
+        let b = self.cfg.border_reserve;
+        // A tile must hold the window's minimum plus its inner gaps and border.
+        let pad = (gin.left + gin.right + 2 * b, gin.top + gin.bottom + 2 * b);
+        let min = |id: WinId| -> (i32, i32) {
+            match self.windows.get(&id) {
+                Some(x) if x.min_size != (0, 0) => (x.min_size.0 + pad.0, x.min_size.1 + pad.1),
+                _ => (0, 0),
+            }
+        };
         let raw = match &w.layout {
-            Layout::Dwindle(d) => d.layout(area, &self.cfg.dwindle),
+            Layout::Dwindle(d) => d.layout_min(area, &self.cfg.dwindle, &min),
             Layout::Master(m) => m.layout(area, &self.cfg.master),
         };
-        let b = self.cfg.border_reserve;
         raw.into_iter()
             .map(|(id, r)| {
                 let mut r = apply_inner_gaps(r, area, gin);
@@ -918,6 +929,15 @@ impl Wm {
             self.emitted_focus = self.focus;
         }
         std::mem::take(&mut self.effects)
+    }
+
+    /// Records the smallest size an app accepts and re-tiles around it.
+    pub fn set_min_size(&mut self, id: WinId, w: i32, h: i32) -> Vec<Effect> {
+        if let Some(win) = self.windows.get_mut(&id) {
+            win.min_size = (win.min_size.0.max(w), win.min_size.1.max(h));
+        }
+        self.invalidate_all();
+        self.sync()
     }
 
     /// Forget what was placed so the next sync re-applies it (app moved itself).
@@ -1665,6 +1685,27 @@ mod tests {
         wm.layout_msg("swapwithmaster");
         let rects = wm.tiled_rects(1);
         assert_eq!(rects[0].0, 3);
+    }
+
+    #[test]
+    fn learned_min_size_retiles_without_overlap() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.set_min_size(3, 1200, 0);
+        let rects = wm.tiled_rects(1);
+        let r3 = rects.iter().find(|x| x.0 == 3).unwrap().1;
+        assert!(r3.w >= 1200, "{r3:?}");
+        for (a, ra) in &rects {
+            for (b, rb) in &rects {
+                if a < b {
+                    let ow = ra.right().min(rb.right()) - ra.x.max(rb.x);
+                    let oh = ra.bottom().min(rb.bottom()) - ra.y.max(rb.y);
+                    assert!(ow <= 0 || oh <= 0, "{a} and {b} overlap");
+                }
+            }
+        }
     }
 
     #[test]

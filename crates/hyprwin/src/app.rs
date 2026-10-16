@@ -54,6 +54,7 @@ pub struct App {
     fights: HashMap<WinId, (u32, Instant)>,
     stubborn: HashSet<WinId>,
     in_movesize: HashSet<WinId>,
+    pending_min: HashMap<WinId, (i32, i32)>,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -105,6 +106,7 @@ impl App {
             fights: HashMap::new(),
             stubborn: HashSet::new(),
             in_movesize: HashSet::new(),
+            pending_min: HashMap::new(),
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -281,6 +283,7 @@ impl App {
             m.remove(&id);
         }
         self.fights.remove(&id);
+        self.pending_min.remove(&id);
         self.stubborn.remove(&id);
         self.meta.remove(&id);
         self.border_override.remove(&id);
@@ -501,9 +504,38 @@ impl App {
                 self.apply(fx);
                 continue;
             }
-            if actual.x == desired.x && actual.y == desired.y && (actual.w > desired.w || actual.h > desired.h) {
-                debug!("{:#x} has a minimum size larger than its tile; leaving it", id);
+            let bigger = actual.w > desired.w + 1 || actual.h > desired.h + 1;
+            // A real minimum-size refusal: Windows applies the new position but
+            // clamps the size. A window that is merely slow to resize is still at
+            // its old position, so it must not be mistaken for a minimum.
+            let moved_there = (actual.x - desired.x).abs() <= 1 && (actual.y - desired.y).abs() <= 1;
+            if bigger && moved_there && self.pending_min.get(&id) != Some(&(actual.w, actual.h)) {
+                // First sighting: ask once more and only learn if it refuses again.
+                self.pending_min.insert(id, (actual.w, actual.h));
+                self.wm.invalidate(id);
+                let fx = self.wm.sync();
+                self.apply(fx);
                 continue;
+            }
+            if bigger && moved_there {
+                self.pending_min.remove(&id);
+                // The app refused to shrink twice: learn its minimum and re-tile around it.
+                let known = self.wm.windows[&id].min_size;
+                let min = (if actual.w > desired.w + 1 { actual.w } else { known.0 }, if actual.h > desired.h + 1 { actual.h } else { known.1 });
+                if min != known {
+                    info!("{:#x} ({}) has a minimum size of {}x{}; re-tiling", id, self.meta.get(&id).map(|m| m.class.as_str()).unwrap_or("?"), min.0, min.1);
+                    let fx = self.wm.set_min_size(id, min.0, min.1);
+                    self.apply(fx);
+                    // Still does not fit (too many windows for the screen): float it.
+                    if let Some(d) = self.wm.desired_rect(id) {
+                        if d.w + 2 < min.0 || d.h + 2 < min.1 {
+                            warn!("{:#x} cannot fit its minimum size here; floating it", id);
+                            let fx = self.wm.set_floating(Some(id), Some(true));
+                            self.apply(fx);
+                        }
+                    }
+                    continue;
+                }
             }
             if self.placed_at.get(&id).is_some_and(|t| now.duration_since(*t) < Duration::from_millis(VERIFY_DELAY_MS as u64)) {
                 self.schedule_verify();
