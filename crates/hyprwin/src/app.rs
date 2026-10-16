@@ -28,6 +28,8 @@ pub const TIMER_SAVE: usize = 3;
 const VERIFY_DELAY_MS: u32 = 150;
 const FIGHT_LIMIT: u32 = 4;
 const FIGHT_WINDOW: Duration = Duration::from_secs(5);
+/// Restores closer together than this are a mass restore ("show desktop").
+const RESTORE_BURST: Duration = Duration::from_millis(600);
 
 struct Drag {
     id: WinId,
@@ -56,6 +58,8 @@ pub struct App {
     stubborn: HashSet<WinId>,
     in_movesize: HashSet<WinId>,
     pending_min: HashMap<WinId, (i32, i32)>,
+    /// (count, window start) of recent restores, to spot mass restores.
+    restores: (u32, Instant),
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -110,6 +114,7 @@ impl App {
             stubborn: HashSet::new(),
             in_movesize: HashSet::new(),
             pending_min: HashMap::new(),
+            restores: (0, Instant::now()),
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -182,6 +187,11 @@ impl App {
 
     fn state_path() -> PathBuf {
         hyprwin_win32::ledger::state_dir().join("state.json")
+    }
+
+    /// True while Windows is restoring several windows at once ("show desktop").
+    fn restore_burst(&self) -> bool {
+        self.restores.0 >= 2 && self.restores.1.elapsed() < RESTORE_BURST * 2
     }
 
     fn schedule_save(&mut self) {
@@ -707,6 +717,17 @@ impl App {
             }
             EVENT_SYSTEM_FOREGROUND => {
                 if managed {
+                    let hidden_ws = self.wm.windows.get(&id).is_some_and(|w| self.wm.desired_rect(w.id).is_none() && !w.minimized);
+                    if hidden_ws && self.restore_burst() {
+                        // Windows activated a window it was mass-restoring
+                        // ("show desktop") that lives on a hidden workspace:
+                        // not a request to switch. Keep the current workspace.
+                        debug!("ignoring activation of {:#x} during a mass restore", id);
+                        if let Some(f) = self.wm.focus {
+                            self.apply(vec![Effect::Focus(f)]);
+                        }
+                        return;
+                    }
                     let fx = self.wm.on_os_focus(id);
                     self.apply(fx);
                     self.keep_floating_on_top(id);
@@ -731,8 +752,20 @@ impl App {
                     // is not a fight.
                     self.fights.remove(&id);
                     self.placed_at.insert(id, Instant::now());
+                    let now = Instant::now();
+                    if now.duration_since(self.restores.1) > RESTORE_BURST {
+                        self.restores = (0, now);
+                    }
+                    self.restores.0 += 1;
                     let fx = self.wm.set_minimized(id, false);
                     self.apply(fx);
+                    // A single restore of the window now in front is the user
+                    // clicking it (taskbar, alt-tab): go to its workspace.
+                    let on_hidden_ws = self.wm.desired_rect(id).is_none();
+                    if on_hidden_ws && !self.restore_burst() && unsafe { GetForegroundWindow() } == h {
+                        let fx = self.wm.on_os_focus(id);
+                        self.apply(fx);
+                    }
                 } else {
                     self.try_manage(h);
                 }

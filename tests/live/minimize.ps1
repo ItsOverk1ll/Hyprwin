@@ -14,8 +14,10 @@ public static class W4 {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
 }
 '@
+function Cloaked4($h) { $v = 0; [void][W4]::DwmGetWindowAttribute($h, 14, [ref]$v, 4); $v }
 $script:fail = 0
 function Check($name, $ok, $detail = '') {
     if ($ok) { Write-Host "  [PASS] $name $detail" } else { Write-Host "  [FAIL] $name $detail" -ForegroundColor Red; $script:fail++ }
@@ -65,6 +67,25 @@ try {
         $after = Layout
         Check "toggle ${round}: identical layout" (($before -join '|') -eq ($after -join '|')) "`n    $($after -join "`n    ")"
     }
+    Write-Host "`n== Show desktop with a window on another workspace (the flapping bug)"
+    Ctl dispatch focuswindow title:hyprwin-mn-4 | Out-Null
+    Ctl dispatch movetoworkspacesilent 2 | Out-Null
+    Start-Sleep -Milliseconds 800
+    $before = Layout
+    $events = Start-Job -ScriptBlock { param($c) & $c events } -ArgumentList $ctl
+    Start-Sleep -Milliseconds 400
+    foreach ($round in 1..2) {
+        $shell.ToggleDesktop(); Start-Sleep -Milliseconds 1200
+        $shell.ToggleDesktop(); Start-Sleep -Milliseconds 1500
+    }
+    Stop-Job $events; $ev = Receive-Job $events; Remove-Job $events
+    $switches = @($ev | Where-Object { $_ -like 'workspace>>*' })
+    Check 'no workspace switching during show desktop' ($switches.Count -eq 0) "switch events: $($switches -join ', ')"
+    Check 'still on workspace 1' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 1)
+    Check 'window on workspace 2 is hidden again' (([W4]::IsIconic($h[4])) -or ((Cloaked4 $h[4]) -ne 0)) "cloaked=$(Cloaked4 $h[4])"
+    $after = Layout
+    Check 'identical layout' (($before -join '|') -eq ($after -join '|')) "`n    $($after -join "`n    ")"
+
     $floated = ((Ctl -j clients | ConvertFrom-Json) | Where-Object { $_.floating }).Count
     Check 'nothing was force-floated' ($floated -eq 0) "floating=$floated"
     $log = Get-Content "$env:HYPRWIN_STATE_DIR\hyprwin.log" -ErrorAction SilentlyContinue

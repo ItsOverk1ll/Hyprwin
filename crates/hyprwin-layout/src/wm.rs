@@ -741,14 +741,15 @@ impl Wm {
             if !self.workspaces.get(&ws).is_some_and(|w| w.layout.contains(id)) {
                 self.attach(id, None);
             }
-            // Restoring a window on a hidden workspace brings that workspace up.
+            // A restore never switches workspaces by itself: "show desktop"
+            // restores windows of every workspace at once, which would make
+            // the screen flap between them. A window on a hidden workspace is
+            // simply hidden again (sync emits Hide); actually *activating* it
+            // (taskbar click, alt-tab) switches via `on_os_focus`.
             let ws = self.windows[&id].ws;
-            if !self.is_visible_ws(ws) && ws > 0 {
-                self.focused_monitor = self.workspaces[&ws].monitor;
-                let fx = self.switch_workspace(&WsSel::Id(ws));
-                self.effects.extend(fx);
+            if self.is_visible_ws(ws) {
+                self.set_focus(Some(id));
             }
-            self.set_focus(Some(id));
         }
         self.effects.push(Effect::Event { name: "minimized", data: format!("{id:x},{}", minimized as u8) });
         self.sync()
@@ -2091,6 +2092,33 @@ mod tests {
             wm.set_minimized(i, false);
         }
         assert_eq!(wm.tiled_rects(1), before, "same windows in the same places");
+    }
+
+    #[test]
+    fn show_desktop_with_windows_on_other_workspaces_does_not_flap() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
+        assert!(!wm.windows[&3].shown);
+        // Show desktop minimizes everything, including the hidden window 3...
+        for i in [1, 2, 3] {
+            wm.set_minimized(i, true);
+        }
+        // ...and restores everything, window 3 included, in any order.
+        for i in [3, 1, 2] {
+            let fx = wm.set_minimized(i, false);
+            assert_eq!(wm.active_workspace(), 1, "never switches workspace on restore");
+            if i == 3 {
+                assert!(fx.contains(&Effect::Hide(3)), "restored straight back into hiding");
+            }
+        }
+        assert!(!wm.windows[&3].shown);
+        assert!(wm.windows[&1].shown && wm.windows[&2].shown);
+        // Activating it for real (taskbar click) still switches.
+        wm.on_os_focus(3);
+        assert_eq!(wm.active_workspace(), 2);
     }
 
     #[test]
