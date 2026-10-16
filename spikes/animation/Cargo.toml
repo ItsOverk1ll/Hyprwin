@@ -1,0 +1,11 @@
+[package]
+name = "animation-spike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+hyprwin-anim.workspace = true
+hyprwin-win32.workspace = true
+windows.workspace = true

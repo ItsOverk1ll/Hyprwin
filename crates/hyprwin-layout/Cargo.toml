@@ -1,0 +1,10 @@
+[package]
+name = "hyprwin-layout"
+description = "Hyprland-compatible layout engine (dwindle, master, workspaces) — pure, no Win32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hyprwin-anim.workspace = true

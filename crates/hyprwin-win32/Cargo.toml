@@ -1,0 +1,12 @@
+[package]
+name = "hyprwin-win32"
+description = "The only hyprwin crate that touches Windows APIs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hyprwin-anim.workspace = true
+windows.workspace = true
+windows-core.workspace = true

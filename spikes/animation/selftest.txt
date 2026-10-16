@@ -1,0 +1,39 @@
+monitor \\.\DISPLAY1 Rect { x: 0, y: 0, w: 3840, h: 2160 } dpi=144 240Hz  clock=DCompositionWaitForCompositorClock
+
+== geometry
+  [PASS] visible frame lands exactly where requested Rect { x: 90, y: 120, w: 630, h: 450 } insets=Insets { l: 9, t: 0, r: 9, b: 9 }
+  [PASS] visible frame lands exactly where requested Rect { x: 840, y: 120, w: 630, h: 450 } insets=Insets { l: 9, t: 0, r: 9, b: 9 }
+  [PASS] visible frame lands exactly where requested Rect { x: 90, y: 660, w: 630, h: 450 } insets=Insets { l: 9, t: 0, r: 9, b: 9 }
+
+== surfaces
+  [PASS] ghost(layered) renders thumbnail (230, 20, 20)
+  [PASS] ghost edge pixel is content (crop correct) (230, 20, 20)
+  [PASS] ghost is click-through hit=HWND(0x1507be)
+  [PASS] overlay renders thumbnail (230, 20, 20)
+  [PASS] overlay is transparent outside thumbnails before=(21, 21, 21) now=(21, 21, 21)
+  [PASS] overlay is click-through hit=HWND(0x1507be)
+  [PASS] cloaked window is invisible (21, 21, 21)
+  [PASS] thumbnail of cloaked window renders (20, 40, 230)
+  [PASS] uncloaked window is visible again (20, 40, 230)
+
+== swap animation (300ms, curve Bezier { x1: 0.0, y1: 0.75, x2: 0.15, y2: 1.0 })
+  ghost strategy               frames= 73 total= 301.0ms  work mean=0.407ms worst=0.962ms  interval mean=4.17ms (expect 4.17) worst=4.25ms late=0  setup=13.6ms teardown=11.0ms
+  [PASS] real window ends at target Rect { x: 840, y: 120, w: 630, h: 450 }
+  [PASS] real window uncloaked 
+  [PASS] target shows real content (230, 20, 20)
+  overlay strategy             frames= 73 total= 303.3ms  work mean=0.092ms worst=0.232ms  interval mean=4.17ms (expect 4.17) worst=4.30ms late=0  setup=37.0ms teardown=10.4ms
+  [PASS] real window ends at target Rect { x: 90, y: 120, w: 630, h: 450 }
+  [PASS] real window uncloaked 
+  [PASS] target shows real content (230, 20, 20)
+
+== workspace switch (slide)
+  workspace out+in             frames= 73 total= 304.1ms  work mean=0.135ms worst=0.229ms  interval mean=4.17ms (expect 4.17) worst=4.23ms late=0  setup=33.5ms teardown=10.0ms
+  [PASS] outgoing windows cloaked 
+  [PASS] incoming window visible 
+  [PASS] incoming window at rest rect 
+  [PASS] incoming shows content 
+
+== naive baseline (SetWindowPos every frame)
+  naive SetWindowPos           frames= 73 total= 304.2ms  work mean=0.022ms worst=0.142ms  interval mean=4.17ms (expect 4.17) worst=4.39ms late=0  setup=0.0ms teardown=0.0ms
+
+0 failure(s)

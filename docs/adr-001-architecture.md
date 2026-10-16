@@ -1,6 +1,6 @@
 # ADR-001 — hyprwin architecture
 
-- **Status:** Proposed. Awaiting approval.
+- **Status:** Accepted 2026-10-16. Defaults confirmed: hyprlang first (Lua later), normal user by default (elevated opt-in), MIT OR Apache-2.0, name "hyprwin".
 - **Date:** 2026-10-16
 - **Evidence:** [research.md](research.md), [spikes/win-api-probe](../spikes/win-api-probe/)
 

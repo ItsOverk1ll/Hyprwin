@@ -1,0 +1,9 @@
+[package]
+name = "hyprwin-anim"
+description = "Hyprland-compatible animation curves and styles (pure, no Win32)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
