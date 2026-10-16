@@ -33,14 +33,14 @@ Start-Sleep -Milliseconds 1200
 
 $procs = @()
 try {
-    # Two windows at least 1400px wide, then one that refuses to be narrower than 2/3 of the screen.
+    # Two windows at least 1400x1100, then one (2/3 of the screen wide, 1100 tall) that refuses to be narrower than 2/3 of the screen.
     $mon = (Ctl -j monitors | ConvertFrom-Json) | Where-Object { $_.focused }
     $wide = [int]($mon.width * 0.66)
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '230,20,20', 100, 100, 500, 400, 'hyprwin-ovf-a', '1400,200' -PassThru
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '230,20,20', 100, 100, 500, 400, 'hyprwin-ovf-a', '1400,1100' -PassThru
     Start-Sleep -Milliseconds 600
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,40,230', 200, 200, 500, 400, 'hyprwin-ovf-b', '1400,200' -PassThru
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,40,230', 200, 200, 500, 400, 'hyprwin-ovf-b', '1400,1100' -PassThru
     Start-Sleep -Milliseconds 600
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,200,40', 300, 300, 500, 400, 'hyprwin-ovf-wide', "$wide,200" -PassThru
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,200,40', 300, 300, 500, 400, 'hyprwin-ovf-wide', "$wide,1100" -PassThru
     Start-Sleep -Milliseconds 2500
 
     $c = Ctl -j clients | ConvertFrom-Json
@@ -56,6 +56,15 @@ try {
     $c = Ctl -j clients | ConvertFrom-Json
     $w = $c | Where-Object { $_.title -eq 'hyprwin-ovf-wide' }
     Check 'switching there shows it, tiled at full size' ((Cloaked $hw) -eq 0 -and $w.size[0] -ge ($wide - 40)) "size=$($w.size -join 'x')"
+    Write-Host "`n== moving it back to workspace 1 by hand (it must tile, not float)"
+    Ctl dispatch focuswindow title:hyprwin-ovf-wide | Out-Null
+    Ctl dispatch movetoworkspace 1 | Out-Null; Start-Sleep -Milliseconds 1500
+    $c = Ctl -j clients | ConvertFrom-Json
+    $w = $c | Where-Object { $_.title -eq 'hyprwin-ovf-wide' }
+    Check 'moved-back window is on workspace 1' ($w.workspace.id -eq 1) "ws=$($w.workspace.id)"
+    Check 'and tiled, not floating' (-not $w.floating)
+    $others = $c | Where-Object { $_.title -ne 'hyprwin-ovf-wide' }
+    Check 'another window made room (moved on), none floating' ((($others | Where-Object { $_.workspace.id -ne 1 }).Count -ge 1) -and (($c | Where-Object { $_.floating }).Count -eq 0)) "$(($others | ForEach-Object { "$($_.title)=ws$($_.workspace.id)" }) -join ' ')"
     Ctl dispatch workspace 1 | Out-Null
 }
 finally {

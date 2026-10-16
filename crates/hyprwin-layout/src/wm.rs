@@ -559,14 +559,12 @@ impl Wm {
         }
         self.attach(w, None);
         if !self.windows[&w].floating {
-            if self.ws_fits(id) {
-                self.windows.get_mut(&w).unwrap().auto_float = false;
-            } else {
-                // Would squeeze something below its minimum: float until there is room.
-                self.detach(w);
-                let win = self.windows.get_mut(&w).unwrap();
-                win.floating = true;
-                win.auto_float = true;
+            self.windows.get_mut(&w).unwrap().auto_float = false;
+            // The user put it here, so it tiles here. If that leaves no room,
+            // rearrange; failing that, move *other* windows on (newest first).
+            if !self.try_fit(id) && id > 0 {
+                let (fx, _) = self.overflow_ws_keeping(id, Some(w));
+                self.effects.extend(fx);
             }
         }
         self.retry_auto_floats(src);
@@ -1234,14 +1232,20 @@ impl Wm {
     /// windows, newest first, to the next workspace with room. The windows that
     /// were there first stay put. Returns each move as (window, workspace).
     pub fn overflow_ws(&mut self, ws: WsId) -> (Vec<Effect>, Vec<(WinId, Option<WsId>)>) {
+        self.overflow_ws_keeping(ws, None)
+    }
+
+    /// Like [`overflow_ws`](Self::overflow_ws), but never moves `keep` (the
+    /// window the user just placed there). Tries rearranging first.
+    pub fn overflow_ws_keeping(&mut self, ws: WsId, keep: Option<WinId>) -> (Vec<Effect>, Vec<(WinId, Option<WsId>)>) {
         let mut moved = Vec::new();
         let mut fx = Vec::new();
         for _ in 0..16 {
-            if self.ws_fits(ws) {
+            if self.try_fit(ws) {
                 break;
             }
-            let tiled = self.layout_order(ws);
-            if tiled.len() <= 1 {
+            let tiled: Vec<WinId> = self.layout_order(ws).into_iter().filter(|id| Some(*id) != keep).collect();
+            if tiled.is_empty() || (keep.is_none() && tiled.len() <= 1) {
                 break;
             }
             let Some(victim) = tiled.into_iter().max_by_key(|id| self.windows[id].seq) else { break };
@@ -1287,6 +1291,38 @@ impl Wm {
             .collect()
     }
 
+    /// Makes `ws` fit by rearranging split directions if needed (dwindle only).
+    /// Returns whether everything fits afterwards.
+    fn try_fit(&mut self, ws: WsId) -> bool {
+        if self.ws_fits(ws) {
+            return true;
+        }
+        let Some(w) = self.workspaces.get(&ws) else { return false };
+        // Minimized windows hold space in the full tree; rearranging around
+        // them could surprise when they come back, so only rearrange without.
+        if w.layout.windows().iter().any(|id| self.windows.get(id).is_some_and(|x| x.minimized)) {
+            return false;
+        }
+        let area = self.layout_area(ws);
+        let gin = self.gaps_in(ws);
+        let b = self.cfg.border_reserve;
+        let pad = (gin.left + gin.right + 2 * b, gin.top + gin.bottom + 2 * b);
+        let mins: std::collections::HashMap<WinId, (i32, i32)> = self
+            .windows
+            .values()
+            .filter(|x| x.ws == ws && x.min_size != (0, 0))
+            .map(|x| (x.id, (x.min_size.0 + pad.0, x.min_size.1 + pad.1)))
+            .collect();
+        let min = |id: WinId| mins.get(&id).copied().unwrap_or((0, 0));
+        let cfg = self.cfg.dwindle.clone();
+        if let Layout::Dwindle(d) = &mut self.workspaces.get_mut(&ws).unwrap().layout {
+            if d.fit_arrangement(area, &cfg, &min) {
+                self.invalidate_all();
+            }
+        }
+        self.ws_fits(ws)
+    }
+
     /// True when every tiled window on `ws` gets at least its minimum size.
     fn ws_fits(&self, ws: WsId) -> bool {
         self.tiled_rects(ws).iter().all(|(id, r)| {
@@ -1301,7 +1337,7 @@ impl Wm {
         for id in candidates {
             self.windows.get_mut(&id).unwrap().floating = false;
             self.attach(id, None);
-            if self.ws_fits(ws) {
+            if self.try_fit(ws) {
                 self.windows.get_mut(&id).unwrap().auto_float = false;
                 self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},0") });
             } else {
@@ -2250,13 +2286,32 @@ mod tests {
         wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
         assert!(!wm.windows[&3].floating, "tiles on the new workspace");
         assert!(!wm.windows[&3].auto_float);
-        // Back on ws 1 it does not fit, so it floats again (still automatic).
+        // Moved back by the user: it tiles there, and the layout rearranges
+        // (2 and 3 go side by side) so everything gets its minimum.
         wm.move_to_workspace(Some(3), &WsSel::Id(1), false);
-        assert!(wm.windows[&3].floating && wm.windows[&3].auto_float);
-        // Closing window 2 frees enough room: it tiles by itself.
-        wm.remove_window(2);
-        assert!(!wm.windows[&3].floating);
+        assert!(!wm.windows[&3].floating, "a window the user moves always tiles");
+        assert_eq!(wm.windows[&3].ws, 1);
+        assert_eq!(wm.windows[&2].ws, 1, "rearranged, nothing evicted");
         assert!(wm.tiled_rects(1).iter().find(|x| x.0 == 3).unwrap().1.h >= 800);
+        assert!(wm.tiled_rects(1).iter().find(|x| x.0 == 2).unwrap().1.h >= 400);
+    }
+
+    #[test]
+    fn window_moved_onto_a_full_workspace_tiles_and_pushes_another_on() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
+        // 1 and 2 already fill ws 1 (each needs most of the screen).
+        wm.set_min_size(1, 1200, 600);
+        wm.set_min_size(2, 1200, 600);
+        wm.set_min_size(3, 600, 600);
+        wm.move_to_workspace(Some(3), &WsSel::Id(1), false);
+        assert_eq!(wm.windows[&3].ws, 1, "stays where the user put it");
+        assert!(!wm.windows[&3].floating);
+        assert_ne!(wm.windows[&2].ws, 1, "the newest *other* window moved on");
+        assert!(wm.tiled_rects(1).iter().all(|(id, r)| r.w + 2 >= wm.windows[id].min_size.0 && r.h + 2 >= wm.windows[id].min_size.1));
     }
 
     #[test]
@@ -2283,15 +2338,31 @@ mod tests {
         for i in 1..=3 {
             wm.add_window(i, tiled(Rect::default()));
         }
-        // Layout is 1 | (2 over 3) in an 1880px-wide area. 1 and 2 (900px each)
-        // fit side by side; 3 needs 1000px in the right column, which does not.
-        wm.set_min_size(1, 900, 0);
-        wm.set_min_size(2, 900, 0);
-        wm.set_min_size(3, 1000, 0);
+        // 1880x1040 area. 1 and 2 (900x600) fit side by side; adding 3
+        // (1000x600) fits in no arrangement: too wide in a row, too tall in a
+        // column. So the newest window (3) moves on and 1 and 2 stay.
+        wm.set_min_size(1, 900, 600);
+        wm.set_min_size(2, 900, 600);
+        wm.set_min_size(3, 1000, 600);
         let (_, moved) = wm.overflow_ws(1);
         assert_eq!(moved, vec![(3, Some(2))]);
         assert_eq!(wm.windows[&1].ws, 1);
         assert_eq!(wm.windows[&2].ws, 1);
+    }
+
+    #[test]
+    fn overflow_ws_rearranges_instead_of_evicting_when_possible() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        // 1 | (2 over 3) doesn't fit 3's width, but stacking all three does.
+        wm.set_min_size(1, 900, 0);
+        wm.set_min_size(2, 900, 0);
+        wm.set_min_size(3, 1000, 0);
+        let (_, moved) = wm.overflow_ws(1);
+        assert!(moved.is_empty(), "{moved:?}");
+        assert_eq!(wm.tiled_rects(1).len(), 3);
     }
 
     #[test]

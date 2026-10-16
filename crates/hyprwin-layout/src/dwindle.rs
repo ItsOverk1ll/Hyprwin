@@ -399,6 +399,61 @@ impl Dwindle {
     }
 }
 
+// ------------------------------------------------------------------ fitting
+
+impl Dwindle {
+    /// True when every window gets at least `min(win)` in `area`.
+    pub fn fits(&self, area: Rect, cfg: &DwindleConfig, min: &dyn Fn(WinId) -> (i32, i32)) -> bool {
+        self.layout_min(area, cfg, min).iter().all(|(w, r)| {
+            let m = min(*w);
+            r.w >= m.0 && r.h >= m.1
+        })
+    }
+
+    /// When the windows don't fit, looks for split directions (side-by-side vs
+    /// stacked) that make every window fit, flipping as few splits as possible.
+    /// The tree shape and window order are kept. Splits the user locked
+    /// (togglesplit / preselect) are never changed. Returns whether it fits now.
+    pub fn fit_arrangement(&mut self, area: Rect, cfg: &DwindleConfig, min: &dyn Fn(WinId) -> (i32, i32)) -> bool {
+        if self.fits(area, cfg, min) {
+            return true;
+        }
+        let raw = self.node_boxes(area, cfg);
+        let mut splits: Vec<(NodeId, bool)> = Vec::new();
+        for (&n, &b) in &raw {
+            if let Kind::Split { split_top, locked: false, .. } = &self.node(n).kind {
+                splits.push((n, self.effective_split_top(*split_top, b, cfg)));
+            }
+        }
+        splits.sort_by_key(|s| s.0);
+        let k = splits.len();
+        if k == 0 || k > 12 {
+            return false;
+        }
+        let candidate = |mask: u32| -> Dwindle {
+            let mut t = self.clone();
+            for (i, &(n, dir)) in splits.iter().enumerate() {
+                if let Kind::Split { split_top, locked, .. } = &mut t.node_mut(n).kind {
+                    *split_top = dir ^ (mask >> i & 1 == 1);
+                    *locked = true;
+                }
+            }
+            t
+        };
+        // Fewest flips first.
+        let mut masks: Vec<u32> = (1..(1u32 << k)).collect();
+        masks.sort_by_key(|m| m.count_ones());
+        for mask in masks {
+            let t = candidate(mask);
+            if t.fits(area, cfg, min) {
+                *self = t;
+                return true;
+            }
+        }
+        false
+    }
+}
+
 // ------------------------------------------------------------------ persistence
 
 impl Dwindle {
@@ -596,6 +651,33 @@ mod tests {
         assert_eq!(r(1).w, 600);
         let total: i64 = l.iter().map(|(_, r)| r.w as i64 * r.h as i64).sum();
         assert_eq!(total, AREA.w as i64 * AREA.h as i64);
+    }
+
+    #[test]
+    fn fit_arrangement_finds_a_layout_that_fits_when_the_spiral_does_not() {
+        // 4 windows in a 3780x2028 area spiral as 1 | (2 / (3 | 4)).
+        // Window 1 needs 2000px of width and the others 1000x1100: side by side
+        // with the rest that is 4000px (too wide), stacked 2 over 3|4 is 2200px
+        // (too tall). Putting 1 on top of a row of 2 | 3 | 4 fits.
+        let area = Rect::new(0, 0, 3780, 2028);
+        let mut d = Dwindle::default();
+        for (w, t) in [(1, None), (2, Some(1)), (3, Some(2)), (4, Some(3))] {
+            d.insert(w, t, None, area, &cfg());
+        }
+        let min = |w: WinId| if w == 1 { (2000, 0) } else { (1000, 1100) };
+        assert!(!d.fits(area, &cfg(), &min));
+        assert!(d.fit_arrangement(area, &cfg(), &min));
+        let l = d.layout_min(area, &cfg(), &min);
+        assert!(l.iter().all(|(w, r)| r.w >= min(*w).0 && r.h >= min(*w).1), "{l:?}");
+        assert_eq!(d.windows(), vec![1, 2, 3, 4], "order kept");
+    }
+
+    #[test]
+    fn fit_arrangement_gives_up_when_impossible() {
+        let mut d = Dwindle::default();
+        d.insert(1, None, None, AREA, &cfg());
+        d.insert(2, Some(1), None, AREA, &cfg());
+        assert!(!d.fit_arrangement(AREA, &cfg(), &|_| (1500, 1000)));
     }
 
     #[test]
