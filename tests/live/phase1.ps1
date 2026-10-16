@@ -130,6 +130,19 @@ try {
     Ctl dispatch movetoworkspace 1 | Out-Null; Settle
     Check 'movetoworkspace follows' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 1 -and (Cloaked $h[0]) -eq 0)
 
+    Write-Host "`n== switching to a workspace whose last-focused window moved away (stale focus bug)"
+    Ctl dispatch focuswindow title:hyprwin-test-2 | Out-Null
+    Ctl dispatch movetoworkspacesilent 2 | Out-Null                 # ws 2 keeps test-2
+    Ctl dispatch focuswindow title:hyprwin-test-0 | Out-Null
+    Ctl dispatch movetoworkspace 2 | Out-Null; Settle               # test-0 visits ws 2 (focused there)
+    Ctl dispatch movetoworkspace 1 | Out-Null; Settle               # ...and goes back to ws 1
+    Ctl dispatch workspace 2 | Out-Null; Start-Sleep -Milliseconds 900
+    Check 'workspace 2 stays active (no bounce back to 1)' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 2)
+    Check 'workspace 2 shows its own window' ((Cloaked $h[2]) -eq 0 -and (Cloaked $h[0]) -ne 0) "test-2 cloaked=$(Cloaked $h[2]) test-0 cloaked=$(Cloaked $h[0])"
+    Ctl dispatch workspace 1 | Out-Null
+    Ctl dispatch focuswindow title:hyprwin-test-2 | Out-Null
+    Ctl dispatch movetoworkspace 1 | Out-Null; Settle
+
     Write-Host "`n== floating / fullscreen / pseudo / special"
     Ctl dispatch focuswindow title:hyprwin-test-1 | Out-Null
     Ctl dispatch togglefloating | Out-Null; Settle

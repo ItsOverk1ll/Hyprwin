@@ -57,7 +57,7 @@ pub struct App {
     fights: HashMap<WinId, (u32, Instant)>,
     stubborn: HashSet<WinId>,
     in_movesize: HashSet<WinId>,
-    pending_min: HashMap<WinId, (i32, i32)>,
+    pending_min: HashMap<WinId, ((i32, i32), Instant)>,
     /// (count, window start) of recent restores, to spot mass restores.
     restores: (u32, Instant),
     stubborn_until: HashMap<WinId, Instant>,
@@ -653,19 +653,30 @@ impl App {
             // clamps the size. A window that is merely slow to resize is still at
             // its old position, so it must not be mistaken for a minimum.
             let moved_there = (actual.x - desired.x).abs() <= 1 && (actual.y - desired.y).abs() <= 1;
-            if bigger && moved_there && self.pending_min.get(&id) != Some(&(actual.w, actual.h)) {
-                // First sighting: ask once more and only learn if it refuses again.
-                self.pending_min.insert(id, (actual.w, actual.h));
-                self.wm.invalidate(id);
-                let fx = self.wm.sync();
-                self.apply(fx);
+            // A "minimum" that spans (nearly) the whole screen is a window still
+            // animating out of a maximized/fullscreen state, not a real minimum
+            // (Discord needs ≈ 32 % of the width, Steam ≈ 40 %).
+            let work = self.wm.workspaces.get(&self.wm.windows[&id].ws).and_then(|w| self.wm.monitors.get(w.monitor)).map(|m| m.spec.work).unwrap_or(desired);
+            let plausible_w = actual.w > desired.w + 1 && (actual.w as f64) < work.w as f64 * 0.9;
+            let plausible_h = actual.h > desired.h + 1 && (actual.h as f64) < work.h as f64 * 0.9;
+            let refuses = bigger && moved_there && (plausible_w || plausible_h);
+            if refuses && !self.pending_min.get(&id).is_some_and(|(s, t)| *s == (actual.w, actual.h) && t.elapsed() >= Duration::from_millis(400)) {
+                // First sighting (or too soon to tell): ask again and only learn
+                // if it still refuses at least 400 ms later.
+                if self.pending_min.get(&id).map(|p| p.0) != Some((actual.w, actual.h)) {
+                    self.pending_min.insert(id, ((actual.w, actual.h), now));
+                    self.wm.invalidate(id);
+                    let fx = self.wm.sync();
+                    self.apply(fx);
+                }
+                self.schedule_verify();
                 continue;
             }
-            if bigger && moved_there {
+            if refuses {
                 self.pending_min.remove(&id);
                 // The app refused to shrink twice: learn its minimum and re-tile around it.
                 let known = self.wm.windows[&id].min_size;
-                let min = (if actual.w > desired.w + 1 { actual.w } else { known.0 }, if actual.h > desired.h + 1 { actual.h } else { known.1 });
+                let min = (if plausible_w { actual.w } else { known.0 }, if plausible_h { actual.h } else { known.1 });
                 if min != known {
                     info!("{:#x} ({}) has a minimum size of {}x{}; re-tiling", id, self.meta.get(&id).map(|m| m.class.as_str()).unwrap_or("?"), min.0, min.1);
                     let fx = self.wm.set_min_size(id, min.0, min.1);

@@ -493,7 +493,7 @@ impl Wm {
             self.effects.push(Effect::Event { name: "workspace", data: self.workspaces[&id].name.clone() });
             self.effects.push(Effect::Event { name: "workspacev2", data: format!("{id},{}", self.workspaces[&id].name) });
         }
-        self.focus = self.workspaces[&id].last_focus.filter(|w| self.windows.contains_key(w)).or_else(|| self.first_window_of(id));
+        self.focus = self.focus_candidate(id);
         self.gc_workspaces();
         self.sync()
     }
@@ -518,7 +518,7 @@ impl Wm {
         if self.monitors[mon].special == Some(id) {
             self.monitors[mon].special = None;
             let active = self.monitors[mon].active;
-            self.focus = self.workspaces.get(&active).and_then(|w| w.last_focus).or_else(|| self.first_window_of(active));
+            self.focus = self.focus_candidate(active);
             self.effects.push(Effect::Event { name: "activespecial", data: format!(",{}", self.monitors[mon].spec.name) });
         } else {
             // A special workspace can only be open on one monitor.
@@ -530,7 +530,7 @@ impl Wm {
             self.ensure_ws(id, Some(&name), mon);
             self.workspaces.get_mut(&id).unwrap().monitor = mon;
             self.monitors[mon].special = Some(id);
-            self.focus = self.workspaces[&id].last_focus.or_else(|| self.first_window_of(id));
+            self.focus = self.focus_candidate(id);
             self.effects.push(Effect::Event { name: "activespecial", data: format!("{name},{}", self.monitors[mon].spec.name) });
         }
         self.gc_workspaces();
@@ -582,7 +582,7 @@ impl Wm {
                 let fx = self.switch_workspace(&WsSel::Id(id));
                 self.effects.extend(fx);
             }
-            self.focus = Some(w);
+            self.set_focus(Some(w));
         } else if self.focus == Some(w) {
             self.focus = self.first_window_of(src);
         }
@@ -1022,7 +1022,7 @@ impl Wm {
     fn focus_monitor_idx(&mut self, m: MonId) {
         self.focused_monitor = m;
         let ws = self.monitors[m].special.unwrap_or(self.monitors[m].active);
-        let f = self.workspaces.get(&ws).and_then(|w| w.last_focus).or_else(|| self.first_window_of(ws));
+        let f = self.focus_candidate(ws);
         self.focus = f;
         let r = self.monitors[m].spec.rect;
         self.effects.push(Effect::WarpCursor { x: r.x + r.w / 2, y: r.y + r.h / 2 });
@@ -1262,6 +1262,18 @@ impl Wm {
                 w.seq = i as u64 + 1;
             }
         }
+    }
+
+    /// The window to focus when `ws` becomes active: its last focused window,
+    /// but only if that window is still on `ws` and not minimized. A stale
+    /// entry (window since moved away) would focus a window on another
+    /// workspace, and that activation would switch straight back.
+    fn focus_candidate(&self, ws: WsId) -> Option<WinId> {
+        self.workspaces
+            .get(&ws)
+            .and_then(|w| w.last_focus)
+            .filter(|id| self.windows.get(id).is_some_and(|w| w.ws == ws && !w.minimized))
+            .or_else(|| self.first_window_of(ws))
     }
 
     /// Tiled windows of `ws` in layout order, without minimized ones.
@@ -2119,6 +2131,25 @@ mod tests {
         // Activating it for real (taskbar click) still switches.
         wm.on_os_focus(3);
         assert_eq!(wm.active_workspace(), 2);
+    }
+
+    #[test]
+    fn switching_to_a_workspace_never_focuses_a_window_that_moved_away() {
+        let mut wm = wm1();
+        wm.add_window(1, tiled(Rect::default()));
+        wm.add_window(2, tiled(Rect::default()));
+        // Window 2 lives on ws 2 for a while and is focused there...
+        wm.move_to_workspace(Some(2), &WsSel::Id(2), true);
+        assert_eq!(wm.workspaces[&2].last_focus, Some(2));
+        wm.add_window(3, tiled(Rect::default())); // keeps ws 2 alive
+        wm.focus_window(2);
+        assert_eq!(wm.workspaces[&2].last_focus, Some(2));
+        // ...then moves back to ws 1.
+        wm.move_to_workspace(Some(2), &WsSel::Id(1), true);
+        let fx = wm.switch_workspace(&WsSel::Id(2));
+        assert_eq!(wm.active_workspace(), 2);
+        assert!(!fx.contains(&Effect::Focus(2)), "must not focus a window on ws 1");
+        assert_eq!(wm.focus, Some(3));
     }
 
     #[test]
