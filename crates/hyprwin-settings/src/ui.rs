@@ -652,6 +652,36 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(8.0);
 }
 
+/// Outlines `r` with a gradient (as hyprwin draws it: 0deg = left to right),
+/// as short segments coloured by their position along the gradient axis.
+fn gradient_outline(p: &egui::Painter, r: egui::Rect, g: &hyprwin_config::Gradient) {
+    let a = g.angle_deg.to_radians();
+    let (dx, dy) = (a.cos() as f32, -(a.sin() as f32));
+    let c = r.center();
+    let half = (r.width() * dx.abs() + r.height() * dy.abs()) / 2.0;
+    let color_at = |pt: egui::Pos2| {
+        let t = if half > 0.0 { ((pt.x - c.x) * dx + (pt.y - c.y) * dy) / (2.0 * half) + 0.5 } else { 0.0 };
+        let pos = t.clamp(0.0, 1.0) * (g.colors.len() - 1) as f32;
+        let i = (pos.floor() as usize).min(g.colors.len() - 2);
+        let f = pos - i as f32;
+        let (x, y) = (to_color32(g.colors[i].0), to_color32(g.colors[i + 1].0));
+        Color32::from_rgb(
+            (x.r() as f32 + (y.r() as f32 - x.r() as f32) * f) as u8,
+            (x.g() as f32 + (y.g() as f32 - x.g() as f32) * f) as u8,
+            (x.b() as f32 + (y.b() as f32 - x.b() as f32) * f) as u8,
+        )
+    };
+    let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+    for w in corners.windows(2) {
+        let n = 24;
+        for k in 0..n {
+            let a = w[0] + (w[1] - w[0]) * (k as f32 / n as f32);
+            let b = w[0] + (w[1] - w[0]) * ((k + 1) as f32 / n as f32);
+            p.line_segment([a, b], Stroke::new(2.0, color_at(a.lerp(b, 0.5))));
+        }
+    }
+}
+
 /// A theme preview card. Returns true when "Apply" is clicked.
 fn theme_card(ui: &mut egui::Ui, t: &ThemeInfo, active: bool) -> bool {
     let mut clicked = false;
@@ -675,8 +705,13 @@ fn theme_card(ui: &mut egui::Ui, t: &ThemeInfo, active: bool) -> bool {
         let inactive = t.inactive.map(to_color32).unwrap_or(Color32::from_gray(90));
         for (i, tile) in [left, rt, rb].into_iter().enumerate() {
             p.rect_filled(tile, CornerRadius::same(r as u8), Color32::from_rgb(40, 43, 54));
-            let c = if i == 0 { accent } else { inactive };
-            p.rect_stroke(tile, CornerRadius::same(r as u8), Stroke::new(2.0, c), egui::StrokeKind::Inside);
+            match t.active_gradient.as_ref().filter(|g| i == 0 && g.colors.len() > 1) {
+                Some(g) => gradient_outline(p, tile.shrink(1.0), g),
+                None => {
+                    let c = if i == 0 { accent } else { inactive };
+                    p.rect_stroke(tile, CornerRadius::same(r as u8), Stroke::new(2.0, c), egui::StrokeKind::Inside);
+                }
+            }
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {

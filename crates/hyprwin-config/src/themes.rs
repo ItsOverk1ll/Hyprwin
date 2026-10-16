@@ -28,6 +28,8 @@ pub struct ThemeInfo {
     pub path: PathBuf,
     /// Parsed colours for previews (0xAARRGGBB).
     pub active: Option<u32>,
+    /// All stops of `col.active_border` (one entry when solid).
+    pub active_gradient: Option<crate::Gradient>,
     pub inactive: Option<u32>,
     pub gaps_in: Option<String>,
     pub gaps_out: Option<String>,
@@ -110,6 +112,7 @@ pub fn read_info(path: &Path) -> Option<ThemeInfo> {
         description: header("description").unwrap_or_default(),
         path: path.to_path_buf(),
         active: get("general:col.active_border").and_then(|v| crate::Color::parse(&v)).map(|c| c.0),
+        active_gradient: get("general:col.active_border").and_then(|v| crate::Gradient::parse(&v)),
         inactive: get("general:col.inactive_border").and_then(|v| crate::Color::parse(&v)).map(|c| c.0),
         gaps_in: get("general:gaps_in"),
         gaps_out: get("general:gaps_out"),
