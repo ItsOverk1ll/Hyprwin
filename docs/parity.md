@@ -138,7 +138,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | `rounding` | 🟡 | Snaps to Windows' presets: 0 → square, 1–5 → small (4 px), 6+ → round (8 px). Arbitrary radii are ❌. |
 | animations (`animation =`, `bezier =`) | ✅ | `windowsMove`, `windowsIn` (popin/slide/gnomed), `workspacesIn/Out` (slide/slidevert/fade/slidefade[vert]), inheritance through the animation tree, `animations:enabled`. Live DWM thumbnails on one click-through overlay at the monitor's refresh rate (242 fps measured); new changes retarget in-flight animations. Real windows move once, cloaked meanwhile (recorded in the crash ledger). Not yet: `windowsOut` (a closed window has no picture left), `fade*`, `border`/`borderangle`, `layers`, `specialWorkspace`. |
 | blur, shadows, dim on other apps | ❌ | DWM owns composition. Our own bar and overlays can use acrylic/mica. |
-| hide taskbar | ⏳ P4 | Recorded in the ledger, so it's always restored. |
+| hide taskbar (`hyprwin:hide_taskbar`, `toggletaskbar`, Settings checkbox) | ✅ | Off by default. `SW_HIDE` on every taskbar, recorded in the ledger first (restored on exit, pause, crash via the guard; re-hidden after Explorer restarts). Tiles reclaim only the edge the taskbar used. Touching that screen edge reveals it until the mouse leaves; Start still opens on the Win key. |
 | `decoration:active_opacity` / `inactive_opacity` | ⏳ P4 | Opt-in. |
 
 ## IPC

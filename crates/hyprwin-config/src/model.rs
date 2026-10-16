@@ -130,7 +130,7 @@ impl Default for Config {
             exec_shutdown: Vec::new(),
             env: Vec::new(),
             reserved: HashMap::new(),
-            hide_taskbar: true,
+            hide_taskbar: false,
             force_tile: false,
             warnings: Vec::new(),
             files: Vec::new(),

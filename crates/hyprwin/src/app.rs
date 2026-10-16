@@ -29,6 +29,7 @@ pub const TIMER_VERIFY: usize = 1;
 pub const TIMER_MONITORS: usize = 2;
 pub const TIMER_SAVE: usize = 3;
 pub const TIMER_GROUPS: usize = 4;
+pub const TIMER_TASKBAR: usize = 5;
 
 const VERIFY_DELAY_MS: u32 = 150;
 const FIGHT_LIMIT: u32 = 4;
@@ -75,6 +76,9 @@ pub struct App {
     anim_active_ws: HashMap<hyprwin_layout::MonId, hyprwin_layout::WsId>,
     anim_focus: Option<WinId>,
     anim_started: Option<Instant>,
+    taskbar_reveal: crate::taskbar::Reveal,
+    /// Set while applying corrections that must not animate.
+    anim_quiet: bool,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -101,7 +105,7 @@ pub fn monitor_specs(cfg: &Config) -> Vec<MonitorSpec> {
     mons.into_iter()
         .map(|m| {
             let name = hyprwin_config::model::normalize_monitor(&m.device);
-            let mut work = m.work;
+            let mut work = crate::taskbar::reclaim(m.rect, m.work);
             if let Some(&(t, b, l, r)) = cfg.reserved.get(&name) {
                 work = Rect::new(work.x + l, work.y + t, work.w - l - r, work.h - t - b);
             }
@@ -139,6 +143,8 @@ impl App {
             anim_active_ws: HashMap::new(),
             anim_focus: None,
             anim_started: None,
+            taskbar_reveal: Default::default(),
+            anim_quiet: false,
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -398,6 +404,7 @@ impl App {
         }
         if paused {
             self.save_state();
+            crate::taskbar::show_all();
             self.restore_everything();
             self.wm = Wm::new(self.cfg.wm.clone(), monitor_specs(&self.cfg));
             self.meta.clear();
@@ -418,6 +425,7 @@ impl App {
             self.paused = false;
             self.install_binds();
             self.manage_existing();
+            self.apply_taskbar();
             info!("resumed");
         }
         crate::tray::update(self.main, self.paused);
@@ -685,7 +693,15 @@ impl App {
     /// Re-checks managed windows after the dust settles: apps that moved
     /// themselves are put back (a few times), maximize becomes fullscreen 1,
     /// and windows with a minimum size larger than their tile are tolerated.
+    /// Re-tiles from here are corrections (refused sizes, learned minimums,
+    /// overflow), not user actions, so they never animate.
     pub fn verify(&mut self) {
+        self.anim_quiet = true;
+        self.verify_inner();
+        self.anim_quiet = false;
+    }
+
+    fn verify_inner(&mut self) {
         if self.paused {
             self.verify_pending = false;
             return;
@@ -842,6 +858,13 @@ impl App {
         let managed = self.wm.windows.contains_key(&id);
         let ours = self.ledger.hidden.contains_key(&(h.0 as isize));
         match ev {
+            EVENT_OBJECT_SHOW if crate::taskbar::Reveal::is_our_bar_visible(h) => {
+                if self.taskbar_reveal.on_shown_by_system() {
+                    unsafe {
+                        SetTimer(Some(self.main), TIMER_TASKBAR, 120, None);
+                    }
+                }
+            }
             EVENT_OBJECT_SHOW | EVENT_OBJECT_CREATE => {
                 if !managed {
                     self.try_manage(h);
@@ -978,6 +1001,11 @@ impl App {
             return;
         }
         let (x, y) = input::last_mouse();
+        if self.taskbar_reveal.on_mouse(x, y) {
+            unsafe {
+                SetTimer(Some(self.main), TIMER_TASKBAR, 120, None);
+            }
+        }
         if self.drag.is_some() {
             self.drag_update(x, y);
             return;
@@ -1252,6 +1280,12 @@ impl App {
                 self.set_paused(!self.paused);
                 return Ok(());
             }
+            Cmd::ToggleTaskbar => {
+                // Runtime only; the config file decides again on reload.
+                self.cfg.hide_taskbar = !self.cfg.hide_taskbar;
+                self.apply_taskbar();
+                return Ok(());
+            }
             Cmd::OpenAppGroup(name) => return self.open_group(name).map(|_| ()),
             Cmd::Reload => {
                 self.reload();
@@ -1283,6 +1317,51 @@ impl App {
         let fx = self.wm.sync();
         self.apply(fx);
         self.emit("configreloaded", "");
+        self.apply_taskbar();
+    }
+
+    // ------------------------------------------------------------------ taskbar
+
+    /// Hides or shows the Windows taskbar to match `hyprwin:hide_taskbar`.
+    pub fn apply_taskbar(&mut self) {
+        let want = self.cfg.hide_taskbar && !self.paused;
+        if want == crate::taskbar::is_hidden() {
+            return;
+        }
+        if want {
+            let ledger = &mut self.ledger;
+            let n = crate::taskbar::hide_all(&mut |hs: &[isize]| {
+                for h in hs {
+                    if !ledger.taskbars.contains(h) {
+                        ledger.taskbars.push(*h);
+                    }
+                }
+                let _ = ledger.save();
+            });
+            info!("taskbar hidden ({n} bar(s)); touch its screen edge to reveal it");
+        } else {
+            let shown = crate::taskbar::show_all();
+            self.ledger.taskbars.retain(|h| !shown.contains(h));
+            let _ = self.ledger.save();
+            info!("taskbar shown");
+        }
+        self.refresh_monitors();
+    }
+
+    /// Explorer restarted: its taskbars are new windows.
+    pub fn on_explorer_restart(&mut self) {
+        let old = crate::taskbar::show_all();
+        self.ledger.taskbars.retain(|h| !old.contains(h));
+        let _ = self.ledger.save();
+        self.apply_taskbar();
+    }
+
+    pub fn taskbar_tick(&mut self) {
+        if !self.taskbar_reveal.tick() {
+            unsafe {
+                let _ = KillTimer(Some(self.main), TIMER_TASKBAR);
+            }
+        }
     }
 
     pub fn refresh_monitors(&mut self) {

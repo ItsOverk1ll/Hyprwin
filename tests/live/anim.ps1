@@ -111,7 +111,8 @@ try {
     Start-Sleep -Milliseconds 1200
     Check 'settled and uncloaked' (Settled @($ha, $hb))
     $bad = Matches-Model; Check 'positions match the model' ($bad.Count -eq 0) ($bad -join '; ')
-    Check 'ledger holds nothing for visible windows' (-not ((Get-Content "$state\hidden.json" -Raw -ErrorAction SilentlyContinue) -match "$([int64]$ha)|$([int64]$hb)"))
+    $hiddenList = ((Get-Content "$state\ledger.json" -Raw) | ConvertFrom-Json).hidden | ConvertTo-Json -Compress
+    Check 'ledger lists neither window as hidden' (-not ("$hiddenList" -match "($([int64]$ha)|$([int64]$hb))")) "hidden=$hiddenList"
 
     Write-Host "`n== workspace switch (workspaces fade) and back"
     Ctl dispatch workspace 2 | Out-Null

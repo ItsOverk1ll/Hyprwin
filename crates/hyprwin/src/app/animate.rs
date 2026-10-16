@@ -86,6 +86,16 @@ impl App {
         let now_active = self.active_by_monitor();
         let before = std::mem::replace(&mut self.anim_active_ws, now_active.clone());
         let mut plan = Plan::default();
+        if self.anim_quiet {
+            // Still remember the targets, so the next real change animates
+            // from the right place and a re-sent target stays a correction.
+            for e in fx {
+                if let Effect::Place { id, rect, .. } = *e {
+                    self.anim_target.insert(id, rect);
+                }
+            }
+            return plan;
+        }
         if self.paused || self.drag.is_some() || !self.cfg.animations_enabled {
             return plan;
         }

@@ -21,6 +21,21 @@ function Check($name, $ok, $detail = '') {
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
 function Cloaked($h) { $v = 0; [void][W2]::DwmGetWindowAttribute($h, 14, [ref]$v, 4); $v }
+# Waits until the layout is quiet: no animation running for 700 ms in a row
+# (minimum sizes are learned in a few rounds), up to $max ms.
+# Waits until the layout is quiet: the window list (workspaces, positions,
+# sizes) unchanged for 1 s and no animation running, up to $max ms. Minimum
+# sizes are learned in a few quick rounds without animating.
+function Settle-Layout($max = 10000) {
+    $t0 = Get-Date; $last = $null; $since = Get-Date
+    while (((Get-Date) - $t0).TotalMilliseconds -lt $max) {
+        $now = Ctl -j clients
+        $busy = [W2]::FindWindow('hyprwin.ghost', [NullString]::Value) -ne [IntPtr]::Zero
+        if ($busy -or $now -ne $last) { $last = $now; $since = Get-Date }
+        elseif (((Get-Date) - $since).TotalMilliseconds -ge 1000) { break }
+        Start-Sleep -Milliseconds 100
+    }
+}
 function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
 
 Kill-Hyprwin; Start-Sleep -Milliseconds 300
@@ -41,7 +56,7 @@ try {
     $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,40,230', 200, 200, 500, 400, 'hyprwin-ovf-b', '1400,1100' -PassThru
     Start-Sleep -Milliseconds 600
     $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,200,40', 300, 300, 500, 400, 'hyprwin-ovf-wide', "$wide,1100" -PassThru
-    Start-Sleep -Milliseconds 2500
+    Start-Sleep -Milliseconds 1000; Settle-Layout
 
     $c = Ctl -j clients | ConvertFrom-Json
     $w = $c | Where-Object { $_.title -eq 'hyprwin-ovf-wide' }
@@ -52,13 +67,13 @@ try {
     Check 'user stays on workspace 1' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 1)
     Check 'it is hidden (on an inactive workspace)' ((Cloaked $hw) -ne 0)
     Check 'the other two still tile on ws 1' ((($c | Where-Object { $_.workspace.id -eq 1 -and -not $_.floating }).Count) -eq 2)
-    Ctl dispatch workspace $w.workspace.id | Out-Null; Start-Sleep -Milliseconds 500
+    Ctl dispatch workspace $w.workspace.id | Out-Null; Settle-Layout
     $c = Ctl -j clients | ConvertFrom-Json
     $w = $c | Where-Object { $_.title -eq 'hyprwin-ovf-wide' }
     Check 'switching there shows it, tiled at full size' ((Cloaked $hw) -eq 0 -and $w.size[0] -ge ($wide - 40)) "size=$($w.size -join 'x')"
     Write-Host "`n== moving it back to workspace 1 by hand (it must tile, not float)"
     Ctl dispatch focuswindow title:hyprwin-ovf-wide | Out-Null
-    Ctl dispatch movetoworkspace 1 | Out-Null; Start-Sleep -Milliseconds 1500
+    Ctl dispatch movetoworkspace 1 | Out-Null; Start-Sleep -Milliseconds 500; Settle-Layout
     $c = Ctl -j clients | ConvertFrom-Json
     $w = $c | Where-Object { $_.title -eq 'hyprwin-ovf-wide' }
     Check 'moved-back window is on workspace 1' ($w.workspace.id -eq 1) "ws=$($w.workspace.id)"

@@ -11,6 +11,7 @@ mod input;
 mod log;
 mod anim;
 mod shell;
+mod taskbar;
 mod tray;
 
 use std::cell::RefCell;
@@ -144,6 +145,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         WM_TIMER => match w.0 {
             app::TIMER_VERIFY => with_app(msg, w, l, |a| a.verify()),
             app::TIMER_SAVE => with_app(msg, w, l, |a| a.save_state()),
+            app::TIMER_TASKBAR => with_app(msg, w, l, |a| a.taskbar_tick()),
             app::TIMER_GROUPS => {
                 unsafe {
                     let _ = KillTimer(Some(h), app::TIMER_GROUPS);
@@ -178,6 +180,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             cloak::release();
             let paused = APP.with(|c| c.try_borrow().ok().and_then(|g| g.as_ref().map(|a| a.paused))).unwrap_or(false);
             tray::add(h, paused);
+            with_app(msg, w, l, |a| a.on_explorer_restart());
         }
         _ => return unsafe { DefWindowProcW(h, msg, w, l) },
     }
@@ -469,6 +472,7 @@ fn main() {
     let mut app = App::new(cfg, cfg_path, main, ev_tx);
     install_win_event_hooks();
     app.manage_existing();
+    app.apply_taskbar();
     APP.with(|c| *c.borrow_mut() = Some(app));
     for c in exec_once.iter().chain(&exec_always) {
         shell::exec(c, &env);

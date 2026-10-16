@@ -559,9 +559,13 @@ impl Wm {
         }
         self.attach(w, None);
         if !self.windows[&w].floating {
-            self.windows.get_mut(&w).unwrap().auto_float = false;
-            // The user put it here, so it tiles here. If that leaves no room,
+            // The user put it here, so it tiles here, and it counts as the
+            // oldest window here: later overflow (e.g. after a minimum size is
+            // learned) moves the others first. If that leaves no room now,
             // rearrange; failing that, move *other* windows on (newest first).
+            let win = self.windows.get_mut(&w).unwrap();
+            win.auto_float = false;
+            win.seq = 0;
             if !self.try_fit(id) && id > 0 {
                 let (fx, _) = self.overflow_ws_keeping(id, Some(w));
                 self.effects.extend(fx);
@@ -696,13 +700,16 @@ impl Wm {
             Layout::Dwindle(d) => d.insert(id, target, cursor, area, &dcfg),
             Layout::Master(m) => m.insert(id, target, &mcfg),
         }
+        // The tree changed: re-choose split directions for minimum sizes.
+        self.try_fit(ws_id);
     }
 
     fn detach(&mut self, id: WinId) {
         let Some(ws) = self.windows.get(&id).map(|w| w.ws) else { return };
-        if let Some(ws) = self.workspaces.get_mut(&ws) {
-            ws.layout.remove(id);
+        if let Some(w) = self.workspaces.get_mut(&ws) {
+            w.layout.remove(id);
         }
+        self.try_fit(ws);
     }
 
     fn tiled_window_at(&self, ws: WsId, x: f64, y: f64) -> Option<WinId> {
@@ -2376,10 +2383,11 @@ mod tests {
         for i in 1..=3 {
             wm.add_window(i, tiled(Rect::default()));
         }
-        // Workspace 2 already has a wide window; 3 cannot fit beside it either.
+        // Workspace 2 already has a big window; 3 fits neither beside it
+        // (too wide) nor above it (too tall).
         wm.move_to_workspace(Some(1), &WsSel::Id(2), false);
-        wm.set_min_size(1, 1500, 0);
-        wm.set_min_size(3, 1500, 0);
+        wm.set_min_size(1, 1500, 600);
+        wm.set_min_size(3, 1500, 600);
         let (_, to) = wm.overflow(3);
         assert_eq!(to, Some(3), "skips full ws 2, creates ws 3");
         assert_eq!(wm.windows[&3].ws, 3);
@@ -2404,6 +2412,46 @@ mod tests {
         assert_eq!(moved, vec![(3, Some(2))]);
         assert_eq!(wm.windows[&1].ws, 1);
         assert_eq!(wm.windows[&2].ws, 1);
+    }
+
+    #[test]
+    fn a_window_the_user_moved_is_not_the_one_evicted_later() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.move_to_workspace(Some(3), &WsSel::Id(2), false);
+        // The user brings 3 (the newest) back to ws 1 while minimums are unknown...
+        wm.move_to_workspace(Some(3), &WsSel::Id(1), false);
+        assert_eq!(wm.windows[&3].ws, 1);
+        // ...then a minimum is learned that means one window must go.
+        wm.set_min_size(1, 900, 600);
+        wm.set_min_size(2, 900, 600);
+        wm.set_min_size(3, 900, 600);
+        let (_, moved) = wm.overflow_ws(1);
+        assert_eq!(wm.windows[&3].ws, 1, "the window the user placed stays: {moved:?}");
+        assert_eq!(moved.len(), 1);
+    }
+
+    #[test]
+    fn fitted_directions_are_recomputed_when_a_window_leaves() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        // 1 | (2 / 3) can't fit 3's width; all stacked does.
+        wm.set_min_size(1, 900, 0);
+        wm.set_min_size(2, 900, 300);
+        wm.set_min_size(3, 1000, 0);
+        let (_, moved) = wm.overflow_ws(1);
+        assert!(moved.is_empty());
+        // With 3 gone, 1 and 2 need 900 + 900 side by side, or 300 + 0
+        // stacked: either fits, so nothing is stuck in the stacked choice and
+        // the natural side-by-side layout comes back.
+        wm.remove_window(3);
+        let r = wm.tiled_rects(1);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].1.y, r[1].1.y, "side by side again: {r:?}");
     }
 
     #[test]

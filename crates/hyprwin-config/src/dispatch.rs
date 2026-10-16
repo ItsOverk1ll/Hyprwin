@@ -51,6 +51,8 @@ pub enum Cmd {
     Exit,
     /// hyprwin extension: pause/resume tiling (windows are restored while paused).
     TogglePause,
+    /// hyprwin extension: hide/show the Windows taskbar until the next reload.
+    ToggleTaskbar,
     /// hyprwin extension: open a saved App Group by name.
     OpenAppGroup(String),
     Reload,
@@ -140,6 +142,7 @@ impl Cmd {
             Cmd::MouseMove => "Drag to move window".into(),
             Cmd::MouseResize => "Drag to resize window".into(),
             Cmd::TogglePause => "Pause / resume tiling".into(),
+            Cmd::ToggleTaskbar => "Hide / show the taskbar".into(),
             Cmd::OpenAppGroup(g) => format!("Open app group \"{g}\""),
             Cmd::Unsupported(w) => format!("(not available: {w})"),
         }
@@ -259,6 +262,7 @@ pub fn parse(dispatcher: &str, arg: &str) -> Result<Cmd, String> {
         "bringactivetotop" | "alterzorder" => Cmd::BringActiveToTop,
         "exit" => Cmd::Exit,
         "togglepause" | "pause" => Cmd::TogglePause,
+        "toggletaskbar" => Cmd::ToggleTaskbar,
         "opengroup" | "openappgroup" => Cmd::OpenAppGroup(a.to_string()),
         "forcerendererreload" => Cmd::Reload,
         "dpms" | "forceidle" => Cmd::Unsupported(format!("{d}: display power is managed by Windows")),

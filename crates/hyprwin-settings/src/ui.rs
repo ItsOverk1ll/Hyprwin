@@ -32,6 +32,7 @@ struct Form {
     corners: u8,
     follow_mouse: bool,
     force_tile: bool,
+    hide_taskbar: bool,
 }
 
 fn to_color32(argb: u32) -> Color32 {
@@ -59,6 +60,7 @@ impl Form {
             },
             follow_mouse: c.follow_mouse != 0,
             force_tile: c.force_tile,
+            hide_taskbar: c.hide_taskbar,
         }
     }
 
@@ -88,6 +90,9 @@ impl Form {
         }
         if self.follow_mouse != base.follow_mouse {
             v.push(("input:follow_mouse", if self.follow_mouse { "1" } else { "0" }.to_string()));
+        }
+        if self.hide_taskbar != base.hide_taskbar {
+            v.push(("hyprwin:hide_taskbar", self.hide_taskbar.to_string()));
         }
         if self.force_tile != base.force_tile {
             v.push(("hyprwin:force_tile", self.force_tile.to_string()));
@@ -348,6 +353,7 @@ impl SettingsApp {
 
         section(ui, "Behaviour", |ui| {
             ui.checkbox(&mut self.form.follow_mouse, "Focus follows the mouse (hovering a window focuses it)");
+            ui.checkbox(&mut self.form.hide_taskbar, "Hide the Windows taskbar (it shows while the mouse touches its screen edge)");
             let mut sww = self.start_with_windows;
             if ui.checkbox(&mut sww, "Start hyprwin when I sign in to Windows").changed() {
                 let ok = match (sww, daemon::daemon_exe()) {

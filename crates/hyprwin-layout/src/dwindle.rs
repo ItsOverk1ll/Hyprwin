@@ -50,6 +50,10 @@ pub struct Dwindle {
     free: Vec<NodeId>,
     root: Option<NodeId>,
     preselect: Option<Dir>,
+    /// Split directions chosen by [`fit_arrangement`](Self::fit_arrangement)
+    /// so windows get their minimum sizes. Unlike user locks these are
+    /// disposable: cleared whenever the tree changes, then recomputed.
+    fitted: std::collections::HashMap<NodeId, bool>,
 }
 
 impl Dwindle {
@@ -112,6 +116,7 @@ impl Dwindle {
     /// Inserts `w`, splitting `target` (or the last window if `target` is not
     /// in the tree). `cursor` is used by `force_split = 0`.
     pub fn insert(&mut self, w: WinId, target: Option<WinId>, cursor: Option<(f64, f64)>, area: Rect, cfg: &DwindleConfig) {
+        self.fitted.clear();
         if self.contains(w) {
             return;
         }
@@ -172,6 +177,7 @@ impl Dwindle {
     }
 
     pub fn remove(&mut self, w: WinId) -> bool {
+        self.fitted.clear();
         let Some(leaf) = self.leaf_of(w) else { return false };
         let parent = self.node(leaf).parent;
         self.release(leaf);
@@ -209,6 +215,18 @@ impl Dwindle {
         out
     }
 
+    /// Direction of split `n`: a user lock wins, then a fitted choice, then
+    /// Hyprland's rule (preserve_split / box aspect).
+    fn dir(&self, n: NodeId, split_top: bool, locked: bool, b: Rect, cfg: &DwindleConfig) -> bool {
+        if locked {
+            split_top
+        } else if let Some(&d) = self.fitted.get(&n) {
+            d
+        } else {
+            self.effective_split_top(split_top, b, cfg)
+        }
+    }
+
     fn effective_split_top(&self, split_top: bool, b: Rect, cfg: &DwindleConfig) -> bool {
         if cfg.preserve_split { split_top } else { b.h as f64 * cfg.split_width_multiplier > b.w as f64 }
     }
@@ -216,7 +234,7 @@ impl Dwindle {
     fn walk(&self, n: NodeId, b: Rect, cfg: &DwindleConfig, out: &mut std::collections::HashMap<NodeId, Rect>) {
         out.insert(n, b);
         if let Kind::Split { children, split_top, ratio, locked } = &self.node(n).kind {
-            let top = if *locked { *split_top } else { self.effective_split_top(*split_top, b, cfg) };
+            let top = self.dir(n, *split_top, *locked, b, cfg);
             let f = ratio / 2.0;
             let (a, c) = if top {
                 let h1 = (b.h as f64 * f).round() as i32;
@@ -244,7 +262,7 @@ impl Dwindle {
         let mut dirs = std::collections::HashMap::new();
         for (&n, &b) in &raw {
             if let Kind::Split { split_top, locked, .. } = &self.node(n).kind {
-                dirs.insert(n, if *locked { *split_top } else { self.effective_split_top(*split_top, b, cfg) });
+                dirs.insert(n, self.dir(n, *split_top, *locked, b, cfg));
             }
         }
         let mut mins = std::collections::HashMap::new();
@@ -323,9 +341,10 @@ impl Dwindle {
         let Some(p) = self.node(leaf).parent else { return };
         let b = self.node_boxes(area, cfg).get(&p).copied().unwrap_or(area);
         let current = match self.node(p).kind {
-            Kind::Split { split_top, locked, .. } => if locked { split_top } else { self.effective_split_top(split_top, b, cfg) },
+            Kind::Split { split_top, locked, .. } => self.dir(p, split_top, locked, b, cfg),
             _ => return,
         };
+        self.fitted.remove(&p);
         // Hyprland only honours togglesplit with preserve_split; we lock the
         // toggled split instead, so it also works without preserve_split.
         if let Kind::Split { split_top, locked, .. } = &mut self.node_mut(p).kind {
@@ -381,7 +400,7 @@ impl Dwindle {
                 let pb = boxes.get(&p).copied().unwrap_or(area);
                 let (is_first, top) = match &self.node(p).kind {
                     Kind::Split { children, split_top, locked, .. } => {
-                        (children[0] == child, if *locked { *split_top } else { self.effective_split_top(*split_top, pb, cfg) })
+                        (children[0] == child, self.dir(p, *split_top, *locked, pb, cfg))
                     }
                     _ => unreachable!(),
                 };
@@ -418,11 +437,18 @@ impl Dwindle {
         if self.fits(area, cfg, min) {
             return true;
         }
-        let raw = self.node_boxes(area, cfg);
+        // Search from the natural arrangement (earlier fitted choices may be stale).
+        let mut base = self.clone();
+        base.fitted.clear();
+        if base.fits(area, cfg, min) {
+            *self = base;
+            return true;
+        }
+        let raw = base.node_boxes(area, cfg);
         let mut splits: Vec<(NodeId, bool)> = Vec::new();
         for (&n, &b) in &raw {
-            if let Kind::Split { split_top, locked: false, .. } = &self.node(n).kind {
-                splits.push((n, self.effective_split_top(*split_top, b, cfg)));
+            if let Kind::Split { split_top, locked: false, .. } = &base.node(n).kind {
+                splits.push((n, base.effective_split_top(*split_top, b, cfg)));
             }
         }
         splits.sort_by_key(|s| s.0);
@@ -431,12 +457,9 @@ impl Dwindle {
             return false;
         }
         let candidate = |mask: u32| -> Dwindle {
-            let mut t = self.clone();
+            let mut t = base.clone();
             for (i, &(n, dir)) in splits.iter().enumerate() {
-                if let Kind::Split { split_top, locked, .. } = &mut t.node_mut(n).kind {
-                    *split_top = dir ^ (mask >> i & 1 == 1);
-                    *locked = true;
-                }
+                t.fitted.insert(n, dir ^ (mask >> i & 1 == 1));
             }
             t
         };
