@@ -77,6 +77,30 @@ pub struct Master {
 }
 
 impl Master {
+    pub fn to_json(&self) -> serde_json::Value {
+        let items: Vec<serde_json::Value> = self.items.iter().map(|i| serde_json::json!({ "w": i.win, "master": i.master, "weight": i.weight })).collect();
+        let orient = self.orientation.map(|o| format!("{o:?}").to_lowercase());
+        serde_json::json!({ "items": items, "mfact": self.mfact, "orientation": orient })
+    }
+
+    pub fn from_json(v: &serde_json::Value, keep: &dyn Fn(WinId) -> bool) -> Master {
+        let mut m = Master {
+            items: Vec::new(),
+            mfact: v["mfact"].as_f64(),
+            orientation: v["orientation"].as_str().and_then(Orientation::parse),
+        };
+        for it in v["items"].as_array().into_iter().flatten() {
+            let Some(w) = it["w"].as_u64() else { continue };
+            if keep(w) && !m.contains(w) {
+                m.items.push(Item { win: w, master: it["master"].as_bool().unwrap_or(false), weight: it["weight"].as_f64().unwrap_or(1.0) });
+            }
+        }
+        if !m.items.is_empty() && !m.items.iter().any(|i| i.master) {
+            m.items[0].master = true;
+        }
+        m
+    }
+
     pub fn windows(&self) -> Vec<WinId> {
         self.items.iter().map(|i| i.win).collect()
     }

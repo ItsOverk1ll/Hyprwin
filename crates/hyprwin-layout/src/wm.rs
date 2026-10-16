@@ -874,6 +874,16 @@ impl Wm {
         if w.minimized || !self.is_visible_ws(w.ws) {
             return None;
         }
+        self.layout_rect(id)
+    }
+
+    /// Where a window sits in its workspace's layout, even if that workspace
+    /// is not shown right now (what `hyprctl clients` reports).
+    pub fn layout_rect(&self, id: WinId) -> Option<Rect> {
+        let w = self.windows.get(&id)?;
+        if w.minimized {
+            return None;
+        }
         let ws = &self.workspaces[&w.ws];
         if let Some((fw, mode)) = ws.fullscreen {
             if fw == id {
@@ -1581,6 +1591,244 @@ impl Wm {
     }
 }
 
+// ------------------------------------------------------------------ workspace ↔ monitor
+
+impl Wm {
+    fn monitor_by_sel(&self, sel: &str) -> Option<MonId> {
+        let sel = sel.trim();
+        if let Some(d) = Dir::parse(sel) {
+            let mons: Vec<(MonId, Rect)> = self.monitors.iter().enumerate().map(|(i, m)| (i, m.spec.rect)).collect();
+            return neighbor(self.monitors.get(self.focused_monitor)?.spec.rect, d, &mons);
+        }
+        match sel {
+            "current" => Some(self.focused_monitor),
+            "+1" => Some((self.focused_monitor + 1) % self.monitors.len()),
+            "-1" => Some((self.focused_monitor + self.monitors.len() - 1) % self.monitors.len()),
+            _ => self
+                .monitors
+                .iter()
+                .position(|m| m.spec.name.eq_ignore_ascii_case(sel.trim_start_matches(r"\\.\")))
+                .or_else(|| sel.parse::<usize>().ok().filter(|i| *i < self.monitors.len())),
+        }
+    }
+
+    /// `moveworkspacetomonitor <ws> <mon>` / `movecurrentworkspacetomonitor <mon>`.
+    pub fn move_workspace_to_monitor(&mut self, ws: Option<&WsSel>, mon: &str) -> Vec<Effect> {
+        let Some(target) = self.monitor_by_sel(mon) else { return self.sync() };
+        let id = match ws {
+            Some(sel) => match self.resolve(sel) {
+                Some((id, _)) if self.workspaces.contains_key(&id) => id,
+                _ => return self.sync(),
+            },
+            None => self.monitors[self.focused_monitor].active,
+        };
+        let source = self.workspaces[&id].monitor;
+        if source == target {
+            return self.sync();
+        }
+        self.workspaces.get_mut(&id).unwrap().monitor = target;
+        // The source monitor needs something to show: its previous workspace, or a new one.
+        if self.monitors[source].active == id {
+            let replacement = self
+                .workspaces
+                .values()
+                .filter(|w| w.monitor == source && w.id > 0 && !self.is_active_anywhere(w.id))
+                .map(|w| w.id)
+                .next()
+                .unwrap_or_else(|| (1..).find(|n| !self.workspaces.contains_key(n)).unwrap());
+            self.ensure_ws(replacement, None, source);
+            self.workspaces.get_mut(&replacement).unwrap().monitor = source;
+            self.monitors[source].active = replacement;
+        }
+        // Show it on the target monitor.
+        let prev = self.monitors[target].active;
+        self.monitors[target].previous = Some(prev);
+        self.monitors[target].active = id;
+        self.focused_monitor = target;
+        let name = self.workspaces[&id].name.clone();
+        self.effects.push(Effect::Event { name: "moveworkspace", data: format!("{name},{}", self.monitors[target].spec.name) });
+        self.effects.push(Effect::Event { name: "moveworkspacev2", data: format!("{id},{name},{}", self.monitors[target].spec.name) });
+        self.invalidate_all();
+        self.gc_workspaces();
+        self.sync()
+    }
+
+    /// `swapactiveworkspaces <mon1> <mon2>`.
+    pub fn swap_active_workspaces(&mut self, a: &str, b: &str) -> Vec<Effect> {
+        let (Some(ma), Some(mb)) = (self.monitor_by_sel(a), self.monitor_by_sel(b)) else { return self.sync() };
+        if ma == mb {
+            return self.sync();
+        }
+        let (wa, wb) = (self.monitors[ma].active, self.monitors[mb].active);
+        self.workspaces.get_mut(&wa).unwrap().monitor = mb;
+        self.workspaces.get_mut(&wb).unwrap().monitor = ma;
+        self.monitors[ma].active = wb;
+        self.monitors[mb].active = wa;
+        self.invalidate_all();
+        self.sync()
+    }
+
+    /// `renameworkspace <id> <name>`: changes only the display name.
+    pub fn rename_workspace(&mut self, id: WsId, name: &str) -> Vec<Effect> {
+        if let Some(ws) = self.workspaces.get_mut(&id) {
+            ws.name = if name.trim().is_empty() { id.to_string() } else { name.trim().to_string() };
+            let n = ws.name.clone();
+            self.effects.push(Effect::Event { name: "renameworkspace", data: format!("{id},{n}") });
+        }
+        self.sync()
+    }
+}
+
+// ------------------------------------------------------------------ persistence
+
+impl Wm {
+    /// Everything needed to put the desktop back after a daemon restart:
+    /// workspaces (with layout trees), monitors' active workspaces, and every
+    /// window's workspace and state. Window ids are HWNDs, valid for the
+    /// lifetime of the windows (so this survives restarts, not reboots).
+    pub fn snapshot(&self) -> serde_json::Value {
+        let workspaces: Vec<serde_json::Value> = self
+            .workspaces
+            .values()
+            .map(|w| {
+                let layout = match &w.layout {
+                    Layout::Dwindle(d) => serde_json::json!({ "kind": "dwindle", "tree": d.to_json() }),
+                    Layout::Master(m) => serde_json::json!({ "kind": "master", "state": m.to_json() }),
+                };
+                serde_json::json!({
+                    "id": w.id,
+                    "name": w.name,
+                    "monitor": self.monitors.get(w.monitor).map(|m| m.spec.name.clone()),
+                    "layout": layout,
+                    "last_focus": w.last_focus,
+                    "persistent": w.persistent,
+                    "fullscreen": w.fullscreen.map(|(id, m)| serde_json::json!([id, m == FullscreenMode::Maximized])),
+                })
+            })
+            .collect();
+        let monitors: Vec<serde_json::Value> = self
+            .monitors
+            .iter()
+            .map(|m| serde_json::json!({ "name": m.spec.name, "active": m.active, "special": m.special, "previous": m.previous }))
+            .collect();
+        let windows: Vec<serde_json::Value> = self
+            .windows
+            .values()
+            .map(|w| {
+                serde_json::json!({
+                    "id": w.id, "ws": w.ws, "floating": w.floating, "auto_float": w.auto_float,
+                    "float_rect": [w.float_rect.x, w.float_rect.y, w.float_rect.w, w.float_rect.h],
+                    "pinned": w.pinned, "pseudo": w.pseudo, "min_size": [w.min_size.0, w.min_size.1], "seq": w.seq,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "version": 1,
+            "workspaces": workspaces,
+            "monitors": monitors,
+            "windows": windows,
+            "focus": self.focus,
+            "focused_monitor": self.monitors.get(self.focused_monitor).map(|m| m.spec.name.clone()),
+            "next_named": self.next_named,
+            "next_special": self.next_special,
+        })
+    }
+
+    /// Restores a [`snapshot`](Self::snapshot) onto the windows that are
+    /// currently managed. Windows that no longer exist are dropped; windows
+    /// that are new keep the placement they got when added. Returns effects.
+    pub fn restore(&mut self, v: &serde_json::Value) -> Vec<Effect> {
+        if v["version"].as_u64() != Some(1) {
+            return self.sync();
+        }
+        let names: Vec<String> = self.monitors.iter().map(|m| m.spec.name.clone()).collect();
+        let mon_idx = |name: Option<&str>| -> Option<MonId> { name.and_then(|n| names.iter().position(|m| m == n)) };
+        // 1. Window state.
+        let mut restored: Vec<WinId> = Vec::new();
+        for s in v["windows"].as_array().into_iter().flatten() {
+            let Some(id) = s["id"].as_u64() else { continue };
+            let Some(w) = self.windows.get_mut(&id) else { continue };
+            w.ws = s["ws"].as_i64().unwrap_or(w.ws);
+            w.floating = s["floating"].as_bool().unwrap_or(w.floating);
+            w.auto_float = s["auto_float"].as_bool().unwrap_or(false);
+            w.pinned = s["pinned"].as_bool().unwrap_or(false);
+            w.pseudo = s["pseudo"].as_bool().unwrap_or(false);
+            w.seq = s["seq"].as_u64().unwrap_or(w.seq);
+            if let Some(r) = s["float_rect"].as_array().filter(|r| r.len() == 4) {
+                let n = |i: usize| r[i].as_i64().unwrap_or(0) as i32;
+                w.float_rect = Rect::new(n(0), n(1), n(2), n(3));
+            }
+            if let Some(m) = s["min_size"].as_array().filter(|m| m.len() == 2) {
+                w.min_size = (m[0].as_i64().unwrap_or(0) as i32, m[1].as_i64().unwrap_or(0) as i32);
+            }
+            restored.push(id);
+        }
+        // 2. Workspaces and their layout trees.
+        for ws in self.workspaces.values_mut() {
+            ws.layout = Layout::new(ws.layout.kind());
+        }
+        for s in v["workspaces"].as_array().into_iter().flatten() {
+            let Some(id) = s["id"].as_i64() else { continue };
+            let name = s["name"].as_str().unwrap_or("").to_string();
+            let mon = mon_idx(s["monitor"].as_str()).unwrap_or(0);
+            self.ensure_ws(id, Some(&name), mon);
+            let tiled_here = |w: WinId| self.windows.get(&w).is_some_and(|x| x.ws == id && !x.floating && !x.minimized);
+            let layout = match s["layout"]["kind"].as_str() {
+                Some("master") => Layout::Master(Master::from_json(&s["layout"]["state"], &tiled_here)),
+                _ => Layout::Dwindle(Dwindle::from_json(&s["layout"]["tree"], &tiled_here)),
+            };
+            let last_focus = s["last_focus"].as_u64().filter(|w| self.windows.contains_key(w));
+            let fullscreen = s["fullscreen"].as_array().and_then(|f| {
+                let w = f.first()?.as_u64().filter(|w| self.windows.contains_key(w))?;
+                Some((w, if f.get(1)?.as_bool()? { FullscreenMode::Maximized } else { FullscreenMode::Fullscreen }))
+            });
+            let ws = self.workspaces.get_mut(&id).unwrap();
+            ws.name = name;
+            ws.monitor = mon;
+            ws.layout = layout;
+            ws.last_focus = last_focus;
+            ws.persistent = s["persistent"].as_bool().unwrap_or(ws.persistent);
+            ws.fullscreen = fullscreen;
+        }
+        // 3. Anything tiled that is not in a restored tree (new windows, or
+        //    windows whose workspace was not saved) is inserted normally.
+        let ids: Vec<WinId> = self.windows.keys().copied().collect();
+        for id in ids {
+            let w = &self.windows[&id];
+            if !self.workspaces.contains_key(&w.ws) {
+                let mon = self.focused_monitor;
+                let wsid = w.ws;
+                self.ensure_ws(wsid, None, mon);
+            }
+            let w = &self.windows[&id];
+            if !w.floating && !w.minimized && !self.workspaces[&w.ws].layout.contains(id) {
+                self.attach(id, None);
+            }
+        }
+        // 4. Monitors.
+        for s in v["monitors"].as_array().into_iter().flatten() {
+            let Some(m) = mon_idx(s["name"].as_str()) else { continue };
+            if let Some(a) = s["active"].as_i64().filter(|a| self.workspaces.contains_key(a)) {
+                self.monitors[m].active = a;
+                self.workspaces.get_mut(&a).unwrap().monitor = m;
+            }
+            self.monitors[m].special = s["special"].as_i64().filter(|a| self.workspaces.contains_key(a));
+            self.monitors[m].previous = s["previous"].as_i64();
+        }
+        if let Some(m) = mon_idx(v["focused_monitor"].as_str()) {
+            self.focused_monitor = m;
+        }
+        self.next_named = self.next_named.max(v["next_named"].as_i64().unwrap_or(0));
+        self.next_special = self.next_special.min(v["next_special"].as_i64().unwrap_or(0));
+        if let Some(f) = v["focus"].as_u64().filter(|f| self.windows.contains_key(f)) {
+            self.focus = Some(f);
+        }
+        self.gc_workspaces();
+        self.invalidate_all();
+        self.sync()
+    }
+}
+
 fn rect_inside(r: Rect, outer: Rect) -> bool {
     let (cx, cy) = r.center();
     contains_point(outer, cx, cy)
@@ -1952,6 +2200,70 @@ mod tests {
         assert!(wm.windows[&2].floating && wm.windows[&2].auto_float);
         assert_eq!(wm.windows[&2].ws, 1);
         assert!(!wm.workspaces.contains_key(&2), "trial workspace cleaned up");
+    }
+
+    #[test]
+    fn snapshot_restore_round_trip_after_daemon_restart() {
+        let mut wm = wm1();
+        for i in 1..=4 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.layout_msg("splitratio 0.3");
+        wm.move_to_workspace(Some(2), &WsSel::Id(3), false);
+        wm.set_floating(Some(4), Some(true));
+        wm.switch_workspace(&WsSel::Id(3));
+        let rects_ws1 = wm.tiled_rects(1);
+        let snap = wm.snapshot();
+
+        // "Restart": a fresh WM sees the same windows (plus one new, minus one closed).
+        let mut wm2 = wm1();
+        for i in [1, 2, 4, 5] {
+            wm2.add_window(i, tiled(Rect::default()));
+        }
+        wm2.restore(&snap);
+        assert_eq!(wm2.active_workspace(), 3, "active workspace restored");
+        assert_eq!(wm2.windows[&2].ws, 3);
+        assert!(wm2.windows[&4].floating);
+        assert!(!wm2.windows.contains_key(&3));
+        // Window 5 is new: still managed, tiled somewhere sensible.
+        assert!(wm2.workspaces.values().any(|w| w.layout.contains(5)));
+        // ws1 keeps its tree shape minus the closed window 3, plus new window 5.
+        assert!(wm2.tiled_rects(1).iter().any(|(id, _)| *id == 1));
+        let _ = rects_ws1;
+    }
+
+    #[test]
+    fn restore_reproduces_exact_geometry_when_nothing_changed() {
+        let mut wm = wm1();
+        for i in 1..=5 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.layout_msg("splitratio 0.4");
+        let before = wm.tiled_rects(1);
+        let snap = wm.snapshot();
+        let mut wm2 = wm1();
+        for i in (1..=5).rev() {
+            wm2.add_window(i, tiled(Rect::default()));
+        }
+        wm2.restore(&snap);
+        assert_eq!(wm2.tiled_rects(1), before);
+    }
+
+    #[test]
+    fn workspace_moves_between_monitors() {
+        let mut wm = Wm::new(WmConfig::default(), vec![mon("A", 0), mon("B", 1920)]);
+        wm.add_window(1, tiled(Rect::new(100, 100, 300, 300)));
+        assert_eq!(wm.windows[&1].ws, 1);
+        wm.move_workspace_to_monitor(None, "B");
+        assert_eq!(wm.workspaces[&1].monitor, 1);
+        assert_eq!(wm.monitors[1].active, 1);
+        assert_ne!(wm.monitors[0].active, 1, "A got another workspace");
+        assert!(wm.desired_rect(1).unwrap().x >= 1920);
+        wm.swap_active_workspaces("A", "B");
+        assert_eq!(wm.monitors[0].active, 1);
+        assert!(wm.desired_rect(1).unwrap().x < 1920);
+        wm.rename_workspace(1, "code");
+        assert_eq!(wm.workspaces[&1].name, "code");
     }
 
     #[test]

@@ -5,12 +5,18 @@
 ```powershell
 cargo test --workspace                                                # 76 unit tests (layout, config, animation, ledger)
 cargo build --release
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1                   # 35 live checks
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1                   # 36 live checks
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\overflow.ps1                 # min-size overflow to the next workspace
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\restart.ps1                  # layout survives clean exit and crash
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update
 ```
 
-`tests/live/phase1.ps1` sets `HYPRWIN_MANAGE_ONLY`, so the daemon manages only the test's own coloured windows and never yours. It checks:
+The live tests set two variables so they never touch your session:
+- `HYPRWIN_MANAGE_ONLY`: the daemon manages only the test's own coloured windows.
+- `HYPRWIN_STATE_DIR`: the tests use their own ledger and saved layout.
+
+They do stop a running hyprwin first; its guard restores your windows. It checks:
 - pixel-exact gaps;
 - workspaces and the special workspace;
 - floating and fullscreen;

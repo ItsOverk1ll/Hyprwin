@@ -26,6 +26,7 @@ function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction Silently
 Kill-Hyprwin; Start-Sleep -Milliseconds 300
 $cfg = "$env:TEMP\hyprwin-test.conf"
 Get-Content "$root\crates\hyprwin-config\src\default.conf" | Set-Content $cfg
+$env:HYPRWIN_STATE_DIR = "$env:TEMP\hyprwin-test-state"
 $env:HYPRWIN_MANAGE_ONLY = '^hyprwin-ovf-'
 $daemon = Start-Process "$bin\hyprwin.exe" -ArgumentList '--config', $cfg -PassThru
 Start-Sleep -Milliseconds 1200
@@ -61,7 +62,7 @@ finally {
     Kill-Hyprwin
     Start-Sleep -Milliseconds 800
     $procs | ForEach-Object { if (-not $_.HasExited) { $_.Kill() } }
-    Remove-Item Env:\HYPRWIN_MANAGE_ONLY -ErrorAction SilentlyContinue
+    Remove-Item Env:\HYPRWIN_MANAGE_ONLY, Env:\HYPRWIN_STATE_DIR -ErrorAction SilentlyContinue
 }
 Write-Host "`n$script:fail failure(s)"
 exit $script:fail

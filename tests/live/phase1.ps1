@@ -77,6 +77,7 @@ Write-Host "test windows: $($h -join ', ')"
 
 $cfg = "$env:TEMP\hyprwin-test.conf"
 Get-Content "$root\crates\hyprwin-config\src\default.conf" | Set-Content $cfg
+$env:HYPRWIN_STATE_DIR = "$env:TEMP\hyprwin-test-state"
 $env:HYPRWIN_MANAGE_ONLY = '^hyprwin-test-'
 $daemon = Start-Process "$bin\hyprwin.exe" -ArgumentList '--config', $cfg -PassThru
 Start-Sleep -Milliseconds 1500
@@ -198,7 +199,7 @@ finally {
     Start-Sleep -Milliseconds 500
     # Belt and braces: replay any ledger left behind.
     $targets | ForEach-Object { if (-not $_.HasExited) { $_.Kill() } }
-    Remove-Item Env:\HYPRWIN_MANAGE_ONLY -ErrorAction SilentlyContinue
+    Remove-Item Env:\HYPRWIN_MANAGE_ONLY, Env:\HYPRWIN_STATE_DIR -ErrorAction SilentlyContinue
 }
 Write-Host "`n$script:fail failure(s)"
 exit $script:fail

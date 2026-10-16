@@ -23,6 +23,7 @@ use crate::{debug, info, warn};
 
 pub const TIMER_VERIFY: usize = 1;
 pub const TIMER_MONITORS: usize = 2;
+pub const TIMER_SAVE: usize = 3;
 
 const VERIFY_DELAY_MS: u32 = 150;
 const FIGHT_LIMIT: u32 = 4;
@@ -61,6 +62,8 @@ pub struct App {
     events: Sender<String>,
     verify_pending: bool,
     pub quit: bool,
+    suppress: bool,
+    save_pending: bool,
     pub started: Instant,
 }
 
@@ -113,6 +116,8 @@ impl App {
             events,
             verify_pending: false,
             quit: false,
+            suppress: false,
+            save_pending: false,
             started: Instant::now(),
         };
         app.install_binds();
@@ -136,6 +141,10 @@ impl App {
     /// Manages every existing window, bottom of the z-order first so the
     /// top-most window ends up focused.
     pub fn manage_existing(&mut self) {
+        // Add everything first without touching any window, then lay out once
+        // (restoring the previous session's layout if there is one), so no
+        // window jumps twice.
+        self.suppress = true;
         let top_first = window::top_level_windows();
         for &h in top_first.iter().rev() {
             self.try_manage(h);
@@ -144,11 +153,75 @@ impl App {
         // oldest, so overflow moves the least recently used windows first.
         let order: Vec<WinId> = top_first.iter().map(|&h| id_of(h)).collect();
         self.wm.set_age_order(&order);
+        self.suppress = false;
+        let fx = match self.load_state() {
+            Some(snap) => {
+                info!("restoring layout from the previous session");
+                self.wm.restore(&snap)
+            }
+            None => {
+                self.wm.invalidate_all();
+                self.wm.sync()
+            }
+        };
+        self.apply(fx);
         if let Some(fg) = Some(unsafe { GetForegroundWindow() }).filter(|h| !h.is_invalid()) {
-            let fx = self.wm.on_os_focus(id_of(fg));
-            self.apply(fx);
+            if self.wm.windows.get(&id_of(fg)).is_some_and(|w| self.wm.desired_rect(w.id).is_some()) {
+                let fx = self.wm.on_os_focus(id_of(fg));
+                self.apply(fx);
+            }
+        }
+        let ids: Vec<WinId> = self.wm.windows.keys().copied().collect();
+        for id in ids {
+            self.set_border(id, self.wm.focus == Some(id));
         }
         info!("managing {} window(s) on {} monitor(s)", self.wm.windows.len(), self.wm.monitors.len());
+    }
+
+    // ------------------------------------------------------------------ persistence
+
+    fn state_path() -> PathBuf {
+        hyprwin_win32::ledger::state_dir().join("state.json")
+    }
+
+    fn schedule_save(&mut self) {
+        if !self.save_pending {
+            self.save_pending = true;
+            unsafe {
+                SetTimer(Some(self.main), TIMER_SAVE, 1000, None);
+            }
+        }
+    }
+
+    /// Writes the layout so a restarted daemon can put everything back.
+    pub fn save_state(&mut self) {
+        self.save_pending = false;
+        unsafe {
+            let _ = KillTimer(Some(self.main), TIMER_SAVE);
+        }
+        let pids: serde_json::Map<String, serde_json::Value> = self.meta.iter().map(|(id, m)| (id.to_string(), json!(m.pid))).collect();
+        let v = json!({ "wm": self.wm.snapshot(), "pids": pids });
+        let path = Self::state_path();
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, v.to_string()).and_then(|_| std::fs::rename(&tmp, &path)).is_err() {
+            warn!("cannot save layout state to {}", path.display());
+        }
+    }
+
+    /// Loads the saved layout, dropping windows whose handle now belongs to a
+    /// different process (handles are reused after a reboot).
+    fn load_state(&self) -> Option<serde_json::Value> {
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(Self::state_path()).ok()?).ok()?;
+        let pids = v["pids"].clone();
+        let same_process = |id: u64| pids[id.to_string()].as_u64().map(|p| p as u32) == self.meta.get(&id).map(|m| m.pid);
+        if let Some(wins) = v["wm"]["windows"].as_array_mut() {
+            wins.retain(|w| w["id"].as_u64().is_some_and(same_process));
+        }
+        let kept: Vec<u64> = v["wm"]["windows"].as_array()?.iter().filter_map(|w| w["id"].as_u64()).collect();
+        if kept.is_empty() {
+            return None;
+        }
+        Some(v["wm"].take())
     }
 
     // ------------------------------------------------------------------ manage
@@ -297,6 +370,12 @@ impl App {
     // ------------------------------------------------------------------ effects
 
     pub fn apply(&mut self, fx: Vec<Effect>) {
+        if self.suppress {
+            return;
+        }
+        if fx.iter().any(|e| !matches!(e, Effect::Event { .. })) {
+            self.schedule_save();
+        }
         let mut ledger_dirty = false;
         for e in fx {
             match e {
@@ -875,6 +954,9 @@ impl App {
                 }
                 self.wm.switch_workspace(sel)
             }
+            Cmd::MoveWorkspaceToMonitor { ws, monitor } => self.wm.move_workspace_to_monitor(ws.as_ref(), monitor),
+            Cmd::SwapActiveWorkspaces(a, b) => self.wm.swap_active_workspaces(a, b),
+            Cmd::RenameWorkspace(id, name) => self.wm.rename_workspace(*id, name),
             Cmd::MoveToWorkspace { ws, window, follow } => {
                 let w = match window {
                     Some(s) => Some(self.resolve_window(s).ok_or("no matching window")?),
@@ -1048,7 +1130,7 @@ impl App {
     fn client_json(&self, id: WinId) -> serde_json::Value {
         let w = &self.wm.windows[&id];
         let m = self.meta.get(&id).cloned().unwrap_or_default();
-        let r = self.wm.desired_rect(id).or_else(|| dwm::frame_bounds(hwnd(id)).ok()).unwrap_or_default();
+        let r = self.wm.layout_rect(id).or_else(|| dwm::frame_bounds(hwnd(id)).ok()).unwrap_or_default();
         let ws = self.wm.workspaces.get(&w.ws);
         let (ic, it) = self.initial.get(&id).cloned().unwrap_or_default();
         json!({

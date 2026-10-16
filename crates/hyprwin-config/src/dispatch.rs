@@ -41,6 +41,10 @@ pub enum Cmd {
     FocusUrgentOrLast,
     ToggleSpecialWorkspace(Option<String>),
     FocusWorkspaceOnCurrentMonitor(WsSel),
+    /// `movecurrentworkspacetomonitor` (ws = None) / `moveworkspacetomonitor`.
+    MoveWorkspaceToMonitor { ws: Option<WsSel>, monitor: String },
+    SwapActiveWorkspaces(String, String),
+    RenameWorkspace(i64, String),
     LayoutMsg(String),
     Submap(String),
     BringActiveToTop,
@@ -171,9 +175,21 @@ pub fn parse(dispatcher: &str, arg: &str) -> Result<Cmd, String> {
         | "lockactivegroup" | "movegroupwindow" | "denywindowfromgroup" | "setignoregrouplock" => {
             Cmd::Unsupported(format!("{d}: groups are planned for Phase 5"))
         }
+        "movecurrentworkspacetomonitor" => Cmd::MoveWorkspaceToMonitor { ws: None, monitor: a.to_string() },
+        "moveworkspacetomonitor" => {
+            let (w, m) = a.split_once(' ').ok_or_else(|| format!("expected 'WORKSPACE MONITOR', got '{a}'"))?;
+            Cmd::MoveWorkspaceToMonitor { ws: Some(ws(w)?), monitor: m.trim().to_string() }
+        }
+        "swapactiveworkspaces" => {
+            let (m1, m2) = a.split_once(' ').ok_or_else(|| format!("expected 'MONITOR1 MONITOR2', got '{a}'"))?;
+            Cmd::SwapActiveWorkspaces(m1.to_string(), m2.trim().to_string())
+        }
+        "renameworkspace" => {
+            let (id, name) = a.split_once(' ').unwrap_or((a, ""));
+            Cmd::RenameWorkspace(id.trim().parse().map_err(|_| format!("bad workspace id '{id}'"))?, name.trim().to_string())
+        }
         "global" | "pass" | "sendshortcut" | "sendkeystate" | "signal" | "signalwindow" | "toggleswallow" | "event" | "setprop"
-        | "tagwindow" | "movecursor" | "movecursortocorner" | "renameworkspace" | "swapactiveworkspaces"
-        | "moveworkspacetomonitor" | "movecurrentworkspacetomonitor" | "resizewindowpixel" | "movewindowpixel" => {
+        | "tagwindow" | "movecursor" | "movecursortocorner" | "resizewindowpixel" | "movewindowpixel" => {
             Cmd::Unsupported(format!("{d}: not implemented yet"))
         }
         _ => return Err(format!("unknown dispatcher '{d}'")),

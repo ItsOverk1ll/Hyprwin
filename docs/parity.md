@@ -64,7 +64,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | `exit` | ✅ | Restores every window first. |
 | `bringactivetotop`, `alterzorder` | ✅ | |
 | `forcerendererreload` | 🟡 | Reloads the config. |
-| `movecurrentworkspacetomonitor`, `moveworkspacetomonitor`, `swapactiveworkspaces`, `renameworkspace` | ⏳ P2 | |
+| `movecurrentworkspacetomonitor`, `moveworkspacetomonitor`, `swapactiveworkspaces`, `renameworkspace` | ✅ | Monitor by name (`DISPLAY1`), index, direction, `+1`/`-1` or `current`. |
 | `movecursor`, `movecursortocorner` | ⏳ P3 | |
 | `tagwindow`, `setprop`, `toggleswallow`, `event`, `signal(window)` | ⏳ P3 / ❌ | `signal` is ❌: Windows has no POSIX signals. |
 | `pass`, `sendshortcut`, `sendkeystate`, `global` | ⏳ P3 | |
@@ -123,7 +123,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | empty workspaces destroyed, `persistent` kept | ✅ | |
 | `binds:workspace_back_and_forth` | ✅ | |
 | monitor hotplug / resolution / DPI change | ✅ | Workspaces move to a remaining monitor. Re-detected on `WM_DISPLAYCHANGE`/`WM_DPICHANGED`/work-area change/resume. |
-| persist layout across daemon restarts | ⏳ P2 | |
+| persist layout across daemon restarts | ✅ | `%LOCALAPPDATA%\hyprwin\state.json`, saved 1 s after changes and on exit. It covers the workspaces, the exact split trees/ratios, each window's workspace, float/pin/pseudo state and learned minimum sizes, and the monitors' active workspaces. Survives clean exits and crashes (verified live). Matched by window handle *and* process ID, so it never applies to the wrong windows. Across a reboot the windows are new, so you start fresh. |
 | apps with a minimum size (Steam, Discord, Spotify, Chromium) | ✅ (hyprwin extension) | Learned when Windows clamps a resize, confirmed on a second attempt. Dwindle split lines move so every window gets its minimum. If a workspace still can't fit everything, its most recently opened windows move silently to the next workspace on that monitor with room. At startup, the least recently used windows move first. A window that fits nowhere, even alone, floats. Windows you move yourself onto a full workspace float there and re-tile when room frees up. Hyprland has no equivalent; Linux apps usually shrink freely. |
 | mixed-DPI multi-monitor | ✅ (model) / ⏳ (manual test) | |
 

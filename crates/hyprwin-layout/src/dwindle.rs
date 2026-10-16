@@ -399,6 +399,72 @@ impl Dwindle {
     }
 }
 
+// ------------------------------------------------------------------ persistence
+
+impl Dwindle {
+    /// Serializes the tree: `{"w": id}` for leaves, `{"a":…,"b":…,"top":…,"ratio":…,"locked":…}` for splits.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self.root {
+            Some(r) => self.node_json(r),
+            None => serde_json::Value::Null,
+        }
+    }
+
+    fn node_json(&self, n: NodeId) -> serde_json::Value {
+        match &self.node(n).kind {
+            Kind::Leaf(w) => serde_json::json!({ "w": w }),
+            Kind::Split { children, split_top, ratio, locked } => serde_json::json!({
+                "a": self.node_json(children[0]),
+                "b": self.node_json(children[1]),
+                "top": split_top,
+                "ratio": ratio,
+                "locked": locked,
+            }),
+        }
+    }
+
+    /// Rebuilds a tree, keeping only windows for which `keep` is true. A split
+    /// that loses one side collapses into the other, exactly like `remove`.
+    pub fn from_json(v: &serde_json::Value, keep: &dyn Fn(WinId) -> bool) -> Dwindle {
+        let mut d = Dwindle::default();
+        d.root = d.build(v, None, keep);
+        d
+    }
+
+    fn build(&mut self, v: &serde_json::Value, parent: Option<NodeId>, keep: &dyn Fn(WinId) -> bool) -> Option<NodeId> {
+        if let Some(w) = v.get("w").and_then(|w| w.as_u64()) {
+            if !keep(w) || self.contains(w) {
+                return None;
+            }
+            return Some(self.alloc(Node { parent, kind: Kind::Leaf(w) }));
+        }
+        let (a, b) = (v.get("a")?, v.get("b")?);
+        let id = self.alloc(Node { parent, kind: Kind::Leaf(0) });
+        let ca = self.build(a, Some(id), keep);
+        let cb = self.build(b, Some(id), keep);
+        match (ca, cb) {
+            (Some(x), Some(y)) => {
+                self.node_mut(id).kind = Kind::Split {
+                    children: [x, y],
+                    split_top: v["top"].as_bool().unwrap_or(false),
+                    ratio: v["ratio"].as_f64().unwrap_or(1.0).clamp(0.1, 1.9),
+                    locked: v["locked"].as_bool().unwrap_or(false),
+                };
+                Some(id)
+            }
+            (Some(only), None) | (None, Some(only)) => {
+                self.release(id);
+                self.node_mut(only).parent = parent;
+                Some(only)
+            }
+            (None, None) => {
+                self.release(id);
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +606,26 @@ mod tests {
         let l = d.layout_min(AREA, &cfg(), &|_| (1200, 0));
         assert_eq!(l[0].1.w, 800);
         assert_eq!(l[1].1.w, 800);
+    }
+
+    #[test]
+    fn json_roundtrip_preserves_layout_and_prunes_missing() {
+        let c = DwindleConfig { preserve_split: true, ..cfg() };
+        let mut d = Dwindle::default();
+        for (w, t) in [(1, None), (2, Some(1)), (3, Some(2)), (4, Some(3))] {
+            d.insert(w, t, None, AREA, &c);
+        }
+        d.split_ratio(2, 0.4, false);
+        d.toggle_split(4, AREA, &c);
+        let v = d.to_json();
+        let back = Dwindle::from_json(&v, &|_| true);
+        assert_eq!(back.layout(AREA, &c), d.layout(AREA, &c));
+        // Window 3 closed while the daemon was down: tree collapses like remove().
+        let pruned = Dwindle::from_json(&v, &|w| w != 3);
+        let mut expect = d.clone();
+        expect.remove(3);
+        assert_eq!(pruned.layout(AREA, &c), expect.layout(AREA, &c));
+        assert!(Dwindle::from_json(&serde_json::Value::Null, &|_| true).is_empty());
     }
 
     #[test]

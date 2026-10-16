@@ -123,6 +123,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         }
         WM_TIMER => match w.0 {
             app::TIMER_VERIFY => with_app(msg, w, l, |a| a.verify()),
+            app::TIMER_SAVE => with_app(msg, w, l, |a| a.save_state()),
             app::TIMER_MONITORS => {
                 unsafe {
                     let _ = KillTimer(Some(h), app::TIMER_MONITORS);
@@ -311,6 +312,7 @@ fn shutdown() {
                 for c in app.cfg.exec_shutdown.clone() {
                     shell::exec(&c, &app.cfg.env);
                 }
+                app.save_state();
                 app.restore_everything();
             }
         } else if let Some(mut l) = Ledger::load() {

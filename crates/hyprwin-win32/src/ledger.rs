@@ -31,7 +31,12 @@ pub struct Ledger {
     pub taskbars: Vec<isize>,
 }
 
+/// `%LOCALAPPDATA%\hyprwin`, or `HYPRWIN_STATE_DIR` (used by tests so they
+/// never touch a real session's ledger or saved layout).
 pub fn state_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("HYPRWIN_STATE_DIR") {
+        return PathBuf::from(d);
+    }
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     base.join("hyprwin")
 }
