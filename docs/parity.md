@@ -151,6 +151,16 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | events emitted | ✅ | `workspace(v2)`, `focusedmon`, `activewindowv2`, `openwindow`, `closewindow`, `movewindow(v2)`, `createworkspace`, `destroyworkspace`, `activespecial`, `changefloatingmode`, `fullscreen`, `pin`, `minimized`, `submap`, `windowtitle(v2)`, `configreloaded`. |
 | `keyword`, `getoption`, `notify`, `seterror`, `setcursor`, `switchxkblayout` | ⏳ P3 | |
 
+## hyprwin extras (beyond Hyprland)
+
+| Feature | Status | Notes |
+|---|---|---|
+| tray icon: pause/resume, App Groups, Themes, Settings, edit config, open log, exit | ✅ | Native Win32 in the daemon (no extra process). Re-added if Explorer restarts. |
+| Settings window | ✅ | `hyprwin-settings.exe` (Rust/egui) runs only while open. Writes `settings.conf`, sourced last. |
+| Themes | ✅ | Shareable hyprlang `.conf` files with `# name/author/description` headers. 6 built in, "save current look as theme", `--apply-theme`. |
+| App Groups (save apps + arrangement, reopen on demand) | ✅ | Launches by AppUserModelID (Store/modern apps) or exe path, and reuses already-open single-window apps. Splash screens never fill a slot. A 45 s timeout arranges whatever arrived. Command-line arguments and window contents are not saved. |
+| `togglepause`, `opengroup NAME` dispatchers; `hyprwinctl pause/resume/status/groups/groupsave/groupopen/groupdelete/settings` | ✅ | |
+
 ## Ecosystem
 
 | Feature | Status | Notes |

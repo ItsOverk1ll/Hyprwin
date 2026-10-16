@@ -18,12 +18,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, 
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::classify::{self, Meta, Verdict};
+
+mod groups;
+pub use groups::list as list_groups;
 use crate::input;
 use crate::{debug, info, warn};
 
 pub const TIMER_VERIFY: usize = 1;
 pub const TIMER_MONITORS: usize = 2;
 pub const TIMER_SAVE: usize = 3;
+pub const TIMER_GROUPS: usize = 4;
 
 const VERIFY_DELAY_MS: u32 = 150;
 const FIGHT_LIMIT: u32 = 4;
@@ -61,6 +65,8 @@ pub struct App {
     /// (count, window start) of recent restores, to spot mass restores.
     restores: (u32, Instant),
     stubborn_until: HashMap<WinId, Instant>,
+    pending_groups: Vec<groups::PendingGroup>,
+    pub paused: bool,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -117,6 +123,8 @@ impl App {
             pending_min: HashMap::new(),
             restores: (0, Instant::now()),
             stubborn_until: HashMap::new(),
+            pending_groups: Vec::new(),
+            paused: false,
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -134,6 +142,10 @@ impl App {
 
     fn install_binds(&mut self) {
         self.binds = self.cfg.effective_binds();
+        if self.paused {
+            // While paused only the pause toggle stays bound.
+            self.binds.retain(|b| b.cmd == Cmd::TogglePause);
+        }
         self.submaps.clear();
         for b in &self.binds {
             if let Some(s) = &b.submap {
@@ -341,6 +353,8 @@ impl App {
         if fullscreen_mode == Some(FullscreenMode::Fullscreen) {
             nw.fullscreen = true;
         }
+        // An App Group being opened may be waiting for this app.
+        let group_slot = self.group_placement(&m.class, reason == "normal app window", &mut nw);
         info!("manage {:#x} '{}' class={} winclass={} {} ({reason})", id, m.title, m.class, m.winclass, if nw.floating { "float" } else { "tile" });
         // Style first, recorded in the ledger so it is always undone.
         let _ = dwm::set_corners(h, dwm::Corners::from_hypr_rounding(rounding));
@@ -354,6 +368,66 @@ impl App {
             self.apply(fx);
         }
         self.set_border(id, self.wm.focus == Some(id));
+        if let Some((gi, slot)) = group_slot {
+            self.fill_group_slot(gi, slot, id);
+        }
+    }
+
+    // ------------------------------------------------------------------ pause
+
+    /// Pausing hands every window back to Windows (shown, borders reset) and
+    /// stops managing; resuming re-manages everything and restores the saved
+    /// layout. Only the togglepause bind stays active while paused.
+    pub fn set_paused(&mut self, paused: bool) {
+        if paused == self.paused {
+            return;
+        }
+        if paused {
+            self.save_state();
+            self.restore_everything();
+            self.wm = Wm::new(self.cfg.wm.clone(), monitor_specs(&self.cfg));
+            self.meta.clear();
+            self.initial.clear();
+            self.placed_at.clear();
+            self.fights.clear();
+            self.stubborn.clear();
+            self.stubborn_until.clear();
+            self.pending_min.clear();
+            self.in_movesize.clear();
+            self.pending_groups.clear();
+            self.border_override.clear();
+            self.drag = None;
+            self.paused = true;
+            self.install_binds();
+            info!("paused: all windows handed back to Windows");
+        } else {
+            self.paused = false;
+            self.install_binds();
+            self.manage_existing();
+            info!("resumed");
+        }
+        crate::tray::update(self.main, self.paused);
+        self.emit("paused", if self.paused { "1" } else { "0" });
+    }
+
+    /// Handles a choice from the tray menu.
+    pub fn on_tray(&mut self, cmd: crate::tray::MenuCmd) {
+        use crate::tray::MenuCmd;
+        match cmd {
+            MenuCmd::TogglePause => self.set_paused(!self.paused),
+            MenuCmd::Settings => crate::shell::open_settings("settings", None),
+            MenuCmd::Themes => crate::shell::open_settings("themes", None),
+            MenuCmd::ManageGroups => crate::shell::open_settings("groups", None),
+            MenuCmd::SaveGroup => crate::shell::open_settings("groups", Some("--save")),
+            MenuCmd::OpenGroup(name) => {
+                if let Err(e) = self.open_group(&name) {
+                    warn!("{e}");
+                }
+            }
+            MenuCmd::OpenConfig => crate::shell::open_in_notepad(&self.cfg_path),
+            MenuCmd::OpenLog => crate::shell::open_in_notepad(&hyprwin_win32::ledger::state_dir().join("hyprwin.log")),
+            MenuCmd::Exit => self.quit = true,
+        }
     }
 
     fn unmanage(&mut self, id: WinId) {
@@ -585,6 +659,10 @@ impl App {
     /// themselves are put back (a few times), maximize becomes fullscreen 1,
     /// and windows with a minimum size larger than their tile are tolerated.
     pub fn verify(&mut self) {
+        if self.paused {
+            self.verify_pending = false;
+            return;
+        }
         self.verify_pending = false;
         unsafe {
             let _ = KillTimer(Some(self.main), TIMER_VERIFY);
@@ -726,6 +804,9 @@ impl App {
     // ------------------------------------------------------------------ events
 
     pub fn on_winevent(&mut self, ev: u32, h: HWND) {
+        if self.paused {
+            return;
+        }
         let id = id_of(h);
         let managed = self.wm.windows.contains_key(&id);
         let ours = self.ledger.hidden.contains_key(&(h.0 as isize));
@@ -860,6 +941,10 @@ impl App {
     // ------------------------------------------------------------------ mouse
 
     pub fn on_mouse_move(&mut self) {
+        if self.paused {
+            let _ = input::last_mouse();
+            return;
+        }
         let (x, y) = input::last_mouse();
         if self.drag.is_some() {
             self.drag_update(x, y);
@@ -893,6 +978,9 @@ impl App {
     }
 
     pub fn on_drag(&mut self, kind: usize, x: i32, y: i32) {
+        if self.paused {
+            return;
+        }
         if kind == input::DRAG_END {
             if let Some(d) = self.drag.take() {
                 let r = dwm::frame_bounds(hwnd(d.id)).unwrap_or(d.start_rect);
@@ -1128,6 +1216,11 @@ impl App {
                 self.quit = true;
                 return Ok(());
             }
+            Cmd::TogglePause => {
+                self.set_paused(!self.paused);
+                return Ok(());
+            }
+            Cmd::OpenAppGroup(name) => return self.open_group(name).map(|_| ()),
             Cmd::Reload => {
                 self.reload();
                 return Ok(());
@@ -1214,6 +1307,30 @@ impl App {
             "debug" => self.q_debug(),
             "configerrors" => self.cfg.warnings.join("\n"),
             "splash" => "Windows, but it gets out of your way.".into(),
+            // hyprwin extensions (used by the Settings window and scripts)
+            "status" => json!({ "paused": self.paused, "windows": self.wm.windows.len(), "version": env!("CARGO_PKG_VERSION") }).to_string(),
+            "pause" => {
+                self.set_paused(true);
+                "ok".into()
+            }
+            "resume" => {
+                self.set_paused(false);
+                "ok".into()
+            }
+            "groups" => {
+                let v: Vec<serde_json::Value> = list_groups().into_iter().map(|(n, c)| json!({ "name": n, "apps": c })).collect();
+                serde_json::to_string(&v).unwrap_or_default()
+            }
+            "groupsave" => self.save_group(rest).unwrap_or_else(|e| format!("error: {e}")),
+            "groupopen" => self.open_group(rest).unwrap_or_else(|e| format!("error: {e}")),
+            "groupdelete" => match groups::delete(rest) {
+                Ok(()) => "ok".into(),
+                Err(e) => format!("error: {e}"),
+            },
+            "settings" => {
+                crate::shell::open_settings(if rest.is_empty() { "settings" } else { rest }, None);
+                "ok".into()
+            }
             "getoption" | "keyword" | "setcursor" | "output" | "switchxkblayout" | "seterror" | "notify" | "dismissnotify" | "kill" => {
                 format!("{cmd}: not supported on Windows yet")
             }
@@ -1356,7 +1473,7 @@ impl App {
                 json!({
                     "modmask": b.mods.0, "mods": b.mods.to_string(), "key": format!("{:?}", b.key),
                     "submap": b.submap.clone().unwrap_or_default(), "description": b.description,
-                    "dispatcher": format!("{:?}", b.cmd), "repeat": b.flags.repeat, "release": b.flags.release, "mouse": b.flags.mouse,
+                    "dispatcher": format!("{:?}", b.cmd), "action": b.cmd.describe(), "repeat": b.flags.repeat, "release": b.flags.release, "mouse": b.flags.mouse,
                 })
             })
             .collect();

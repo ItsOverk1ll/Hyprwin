@@ -22,3 +22,4 @@ regex = "1.13"
 
 [build-dependencies]
 embed-manifest = "1.4"
+embed-resource = "3.0"

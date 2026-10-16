@@ -9,7 +9,10 @@ pub mod dispatch;
 pub mod keys;
 pub mod model;
 pub mod parse;
+pub mod paths;
 pub mod rules;
+pub mod settings;
+pub mod themes;
 
 pub use dispatch::{Cmd, Delta};
 pub use keys::{Key, Mods};

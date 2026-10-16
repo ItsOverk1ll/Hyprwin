@@ -19,6 +19,18 @@ cargo build --release
 - **Emergency exit: Ctrl + Alt + Shift + Win + Esc.** This restores every window and quits. It's hard-coded and can't be unbound.
 - If hyprwin is killed or crashes, `hyprwin-guard` puts every hidden window back.
 
+## For everyone: the tray icon
+
+While hyprwin runs it sits in the system tray. Click it for:
+
+- **Pause / Resume tiling.** Paused, every window behaves like normal Windows again. Resuming puts your layout back.
+- **App Groups.** Open a saved group of apps, or save the current workspace as one. Saving remembers the apps and how they're arranged. Opening launches anything that isn't running (or reuses what is) and arranges everything as saved.
+- **Themes…** Pick a look: colours, borders, corners and gaps. Themes are plain `.conf` files in `%APPDATA%\hyprwin\themes`, so they're easy to share and make. Six ship built in.
+- **Settings…** Layout, gaps, border colours, corners, focus-follows-mouse, "tile everything", start with Windows.
+- **Exit hyprwin.**
+
+Settings and themes are written to `%APPDATA%\hyprwin\settings.conf` and to a small marked block at the end of your config. Nothing else in your `hyprland.conf` is ever rewritten. Scripts can apply a theme with `hyprwin-settings --apply-theme nord`.
+
 ## Default keys (Hyprland's)
 
 | Keys | Action |

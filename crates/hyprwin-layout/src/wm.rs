@@ -1805,6 +1805,39 @@ impl Wm {
         })
     }
 
+    /// A workspace's tiled arrangement as JSON (`{"kind":"dwindle","tree":…}`
+    /// or `{"kind":"master","state":…}`), as used by snapshots and App Groups.
+    pub fn workspace_layout_json(&self, ws: WsId) -> serde_json::Value {
+        match self.workspaces.get(&ws).map(|w| &w.layout) {
+            Some(Layout::Dwindle(d)) => serde_json::json!({ "kind": "dwindle", "tree": d.to_json() }),
+            Some(Layout::Master(m)) => serde_json::json!({ "kind": "master", "state": m.to_json() }),
+            None => serde_json::Value::Null,
+        }
+    }
+
+    /// Replaces `ws`'s tiled arrangement with a saved one (App Groups). Only
+    /// windows that are tiled on `ws` are kept from the saved tree; tiled
+    /// windows on `ws` that the tree does not mention are inserted normally.
+    pub fn set_workspace_layout(&mut self, ws: WsId, layout: &serde_json::Value) -> Vec<Effect> {
+        if !self.workspaces.contains_key(&ws) {
+            return self.sync();
+        }
+        let tiled_here = |w: WinId| self.windows.get(&w).is_some_and(|x| x.ws == ws && !x.floating);
+        let new = match layout["kind"].as_str() {
+            Some("master") => Layout::Master(Master::from_json(&layout["state"], &tiled_here)),
+            _ => Layout::Dwindle(Dwindle::from_json(&layout["tree"], &tiled_here)),
+        };
+        self.workspaces.get_mut(&ws).unwrap().layout = new;
+        let ids: Vec<WinId> = self.windows.values().filter(|w| w.ws == ws && !w.floating && !w.minimized).map(|w| w.id).collect();
+        for id in ids {
+            if !self.workspaces[&ws].layout.contains(id) {
+                self.attach(id, None);
+            }
+        }
+        self.invalidate_all();
+        self.sync()
+    }
+
     /// Restores a [`snapshot`](Self::snapshot) onto the windows that are
     /// currently managed. Windows that no longer exist are dropped; windows
     /// that are new keep the placement they got when added. Returns effects.
@@ -1897,6 +1930,29 @@ impl Wm {
         self.gc_workspaces();
         self.invalidate_all();
         self.sync()
+    }
+}
+
+/// Rewrites every window id (`"w": n`) in a saved layout JSON. `f` returns the
+/// new id, or `None` to drop that window (it is then pruned on load).
+pub fn remap_layout_ids(v: &mut serde_json::Value, f: &dyn Fn(u64) -> Option<u64>) {
+    match v {
+        serde_json::Value::Object(map) => {
+            if let Some(w) = map.get("w").and_then(|w| w.as_u64()) {
+                map.insert("w".into(), serde_json::json!(f(w).unwrap_or(0)));
+            }
+            for (k, child) in map.iter_mut() {
+                if k != "w" {
+                    remap_layout_ids(child, f);
+                }
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for child in a {
+                remap_layout_ids(child, f);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -2436,6 +2492,30 @@ mod tests {
         }
         wm2.restore(&snap);
         assert_eq!(wm2.tiled_rects(1), before);
+    }
+
+    #[test]
+    fn app_group_layout_roundtrip_with_new_window_ids() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.layout_msg("splitratio 0.5");
+        let before: Vec<Rect> = wm.tiled_rects(1).into_iter().map(|(_, r)| r).collect();
+        // Save with ids 1,2,3 → slots 0,1,2.
+        let mut saved = wm.workspace_layout_json(1);
+        remap_layout_ids(&mut saved, &|w| Some(w - 1));
+        // Later the same apps come back as windows 11, 12, 13 on workspace 4.
+        let mut wm2 = wm1();
+        wm2.switch_workspace(&WsSel::Id(4));
+        for id in [13, 11, 12] {
+            wm2.add_window(id, NewWindow { workspace: Some(WsSel::Id(4)), ..tiled(Rect::default()) });
+        }
+        remap_layout_ids(&mut saved, &|slot| Some(slot + 11));
+        wm2.set_workspace_layout(4, &saved);
+        let after: Vec<Rect> = wm2.tiled_rects(4).into_iter().map(|(_, r)| r).collect();
+        assert_eq!(after, before, "same arrangement, new windows");
+        assert_eq!(wm2.workspaces[&4].layout_windows(), vec![11, 12, 13]);
     }
 
     #[test]

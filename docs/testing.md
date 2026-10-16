@@ -9,6 +9,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1       
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\overflow.ps1                 # min-size overflow to the next workspace
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\restart.ps1                  # layout survives clean exit and crash
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\minimize.ps1                 # show desktop / minimize storms keep the layout
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\ux.ps1                       # tray, themes, settings.conf, pause, App Groups (isolated APPDATA)
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update
 ```

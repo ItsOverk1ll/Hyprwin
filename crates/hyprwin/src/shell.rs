@@ -73,6 +73,28 @@ pub fn mark_fullscreen(h: HWND, on: bool) {
     }
 }
 
+/// Opens hyprwin's Settings window (a separate, on-demand process) at a tab.
+pub fn open_settings(tab: &str, extra: Option<&str>) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let app = exe.with_file_name("hyprwin-settings.exe");
+    if !app.exists() {
+        crate::warn!("hyprwin-settings.exe not found next to hyprwin.exe");
+        return;
+    }
+    let mut c = std::process::Command::new(app);
+    c.args(["--tab", tab]);
+    if let Some(e) = extra {
+        c.arg(e);
+    }
+    if let Err(e) = c.spawn() {
+        crate::warn!("cannot open settings: {e}");
+    }
+}
+
+pub fn open_in_notepad(path: &std::path::Path) {
+    let _ = std::process::Command::new("notepad.exe").arg(path).spawn();
+}
+
 pub fn working_set_mb() -> f64 {
     let mut pmc = PROCESS_MEMORY_COUNTERS { cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32, ..Default::default() };
     unsafe {

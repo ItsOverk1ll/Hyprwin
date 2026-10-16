@@ -10,6 +10,7 @@ mod classify;
 mod input;
 mod log;
 mod shell;
+mod tray;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -113,6 +114,22 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             }
         }
         WM_APP_RELOAD => with_app(msg, w, l, |a| a.reload()),
+        tray::WM_APP_TRAY => {
+            // NOTIFYICON_VERSION_4: the event is in the low word of lParam.
+            let event = (l.0 as u32) & 0xFFFF;
+            const NIN_SELECT: u32 = WM_USER;
+            const NIN_KEYSELECT: u32 = WM_USER + 1;
+            match event {
+                WM_CONTEXTMENU | NIN_SELECT | NIN_KEYSELECT => {
+                    let (paused, groups) = APP.with(|c| c.try_borrow().ok().and_then(|g| g.as_ref().map(|a| (a.paused, app::list_groups())))).unwrap_or((false, Vec::new()));
+                    if let Some(cmd) = tray::show_menu(h, paused, &groups) {
+                        with_app(msg, w, l, |a| a.on_tray(cmd));
+                    }
+                }
+                WM_LBUTTONDBLCLK => shell::open_settings("settings", None),
+                _ => {}
+            }
+        }
         WM_APP_REPOST => {
             // A deferred message; re-dispatch the cheap ones that carry no payload.
             match w.0 as u32 {
@@ -124,6 +141,12 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         WM_TIMER => match w.0 {
             app::TIMER_VERIFY => with_app(msg, w, l, |a| a.verify()),
             app::TIMER_SAVE => with_app(msg, w, l, |a| a.save_state()),
+            app::TIMER_GROUPS => {
+                unsafe {
+                    let _ = KillTimer(Some(h), app::TIMER_GROUPS);
+                }
+                with_app(msg, w, l, |a| a.check_groups());
+            }
             app::TIMER_MONITORS => {
                 unsafe {
                     let _ = KillTimer(Some(h), app::TIMER_MONITORS);
@@ -148,8 +171,10 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             }
         }
         m if Some(&m) == TASKBAR_CREATED.get() => {
-            info!("explorer restarted; refreshing shell interfaces");
+            info!("explorer restarted; refreshing shell interfaces and tray icon");
             cloak::release();
+            let paused = APP.with(|c| c.try_borrow().ok().and_then(|g| g.as_ref().map(|a| a.paused))).unwrap_or(false);
+            tray::add(h, paused);
         }
         _ => return unsafe { DefWindowProcW(h, msg, w, l) },
     }
@@ -409,6 +434,8 @@ fn main() {
         shell::exec(c, &env);
     }
     spawn_guard();
+    hyprwin_config::themes::install_builtins();
+    tray::add(main, false);
     info!("ready");
 
     let mut msg = MSG::default();
@@ -419,6 +446,7 @@ fn main() {
         }
     }
     info!("exiting");
+    tray::remove(main);
     shutdown();
     std::process::exit(0);
 }

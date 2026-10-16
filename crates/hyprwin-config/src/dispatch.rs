@@ -49,12 +49,101 @@ pub enum Cmd {
     Submap(String),
     BringActiveToTop,
     Exit,
+    /// hyprwin extension: pause/resume tiling (windows are restored while paused).
+    TogglePause,
+    /// hyprwin extension: open a saved App Group by name.
+    OpenAppGroup(String),
     Reload,
     /// `bindm` actions.
     MouseMove,
     MouseResize,
     /// Parsed but not available on Windows; the string is the reason.
     Unsupported(String),
+}
+
+fn ws_text(w: &WsSel) -> String {
+    match w {
+        WsSel::Id(n) => format!("workspace {n}"),
+        WsSel::Name(n) => format!("workspace \"{n}\""),
+        WsSel::Relative(d) | WsSel::MonitorRelative(d) | WsSel::OpenRelative(d) => {
+            if *d >= 0 { "the next workspace".into() } else { "the previous workspace".into() }
+        }
+        WsSel::Previous => "the previous workspace".into(),
+        WsSel::Empty => "an empty workspace".into(),
+        WsSel::Special(_) => "the scratchpad".into(),
+    }
+}
+
+fn dir_text(d: Dir) -> &'static str {
+    match d {
+        Dir::Left => "left",
+        Dir::Right => "right",
+        Dir::Up => "up",
+        Dir::Down => "down",
+    }
+}
+
+impl Cmd {
+    /// Plain-English description for the Settings window's keybind list.
+    pub fn describe(&self) -> String {
+        match self {
+            Cmd::Exec(c) | Cmd::ExecRaw(c) => match c.as_str() {
+                "wt" => "Open Windows Terminal".into(),
+                "explorer" => "Open File Explorer".into(),
+                "explorer shell:AppsFolder" => "Open the apps list".into(),
+                other => format!("Run: {other}"),
+            },
+            Cmd::KillActive | Cmd::CloseWindow(_) => "Close window".into(),
+            Cmd::ForceKillActive | Cmd::KillWindow(_) => "Force-quit app".into(),
+            Cmd::Workspace(w) => match w {
+                WsSel::Special(_) => "Show / hide the scratchpad".into(),
+                other => format!("Go to {}", ws_text(other)),
+            },
+            Cmd::MoveToWorkspace { ws, follow, .. } => format!("Move window to {}{}", ws_text(ws), if *follow { "" } else { " (stay here)" }),
+            Cmd::ToggleFloating(_) => "Float / tile window".into(),
+            Cmd::SetFloating(_) => "Float window".into(),
+            Cmd::SetTiled(_) => "Tile window".into(),
+            Cmd::Fullscreen { mode: 1, .. } => "Maximize window".into(),
+            Cmd::Fullscreen { .. } => "Fullscreen window".into(),
+            Cmd::Pin(_) => "Pin window to all workspaces".into(),
+            Cmd::Pseudo(_) => "Pseudotile (keep window size)".into(),
+            Cmd::MoveFocus(d) => format!("Focus window {}", dir_text(*d)),
+            Cmd::MoveWindow(d) => format!("Move window {}", dir_text(*d)),
+            Cmd::MoveWindowToMonitor(m) => format!("Move window to monitor {m}"),
+            Cmd::SwapWindow(d) => format!("Swap window {}", dir_text(*d)),
+            Cmd::CenterWindow => "Center window".into(),
+            Cmd::ResizeActive { x, y, .. } => {
+                let dir = if x.value > 0.0 { "wider" } else if x.value < 0.0 { "narrower" } else if y.value > 0.0 { "taller" } else { "shorter" };
+                format!("Make window {dir}")
+            }
+            Cmd::MoveActive { .. } => "Move floating window".into(),
+            Cmd::CycleNext { prev, .. } => if *prev { "Focus previous window" } else { "Focus next window" }.into(),
+            Cmd::SwapNext { .. } => "Swap with next window".into(),
+            Cmd::FocusWindow(_) => "Focus a specific window".into(),
+            Cmd::FocusMonitor(m) => format!("Focus monitor {m}"),
+            Cmd::FocusCurrentOrLast | Cmd::FocusUrgentOrLast => "Focus the last window".into(),
+            Cmd::ToggleSpecialWorkspace(_) => "Show / hide the scratchpad".into(),
+            Cmd::FocusWorkspaceOnCurrentMonitor(w) => format!("Bring {} to this monitor", ws_text(w)),
+            Cmd::MoveWorkspaceToMonitor { monitor, .. } => format!("Move workspace to monitor {monitor}"),
+            Cmd::SwapActiveWorkspaces(..) => "Swap monitors' workspaces".into(),
+            Cmd::RenameWorkspace(..) => "Rename workspace".into(),
+            Cmd::LayoutMsg(m) => match m.split_whitespace().next().unwrap_or("") {
+                "togglesplit" => "Toggle split direction".into(),
+                "swapsplit" => "Swap split halves".into(),
+                "swapwithmaster" => "Make window the master".into(),
+                other => format!("Layout: {other}"),
+            },
+            Cmd::Submap(s) => format!("Enter mode \"{s}\""),
+            Cmd::BringActiveToTop => "Bring window to front".into(),
+            Cmd::Exit => "Quit hyprwin".into(),
+            Cmd::Reload => "Reload config".into(),
+            Cmd::MouseMove => "Drag to move window".into(),
+            Cmd::MouseResize => "Drag to resize window".into(),
+            Cmd::TogglePause => "Pause / resume tiling".into(),
+            Cmd::OpenAppGroup(g) => format!("Open app group \"{g}\""),
+            Cmd::Unsupported(w) => format!("(not available: {w})"),
+        }
+    }
 }
 
 fn opt(arg: &str) -> Option<String> {
@@ -169,6 +258,8 @@ pub fn parse(dispatcher: &str, arg: &str) -> Result<Cmd, String> {
         "submap" => Cmd::Submap(a.to_string()),
         "bringactivetotop" | "alterzorder" => Cmd::BringActiveToTop,
         "exit" => Cmd::Exit,
+        "togglepause" | "pause" => Cmd::TogglePause,
+        "opengroup" | "openappgroup" => Cmd::OpenAppGroup(a.to_string()),
         "forcerendererreload" => Cmd::Reload,
         "dpms" | "forceidle" => Cmd::Unsupported(format!("{d}: display power is managed by Windows")),
         "togglegroup" | "changegroupactive" | "moveintogroup" | "moveoutofgroup" | "movewindoworgroup" | "lockgroups"

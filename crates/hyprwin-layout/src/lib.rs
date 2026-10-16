@@ -11,7 +11,7 @@ pub mod master;
 pub mod wm;
 
 pub use geom::{Dir, Gaps, Rect};
-pub use wm::{Effect, FullscreenMode, LayoutKind, Wm, WmConfig, WsSel};
+pub use wm::{Effect, FullscreenMode, LayoutKind, Wm, WmConfig, WsSel, remap_layout_ids};
 
 /// Opaque window identity (the HWND value in the daemon).
 pub type WinId = u64;
