@@ -11,6 +11,7 @@ repository = "https://github.com/hyprwin/hyprwin"
 
 [workspace.dependencies]
 hyprwin-anim = { path = "crates/hyprwin-anim" }
+hyprwin-config = { path = "crates/hyprwin-config" }
 hyprwin-layout = { path = "crates/hyprwin-layout" }
 hyprwin-win32 = { path = "crates/hyprwin-win32" }
 

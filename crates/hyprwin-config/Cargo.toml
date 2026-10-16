@@ -1,0 +1,12 @@
+[package]
+name = "hyprwin-config"
+description = "hyprland.conf (hyprlang) parser and typed config for hyprwin — pure, no Win32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hyprwin-anim.workspace = true
+hyprwin-layout.workspace = true
+regex = "1.13"
