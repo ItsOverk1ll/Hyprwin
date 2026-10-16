@@ -1,4 +1,4 @@
-test windows: 2427890, 3082596, 3934364
+test windows: 10093276, 3673342, 1509390
 
 == startup
   [PASS] daemon answers IPC hyprwin 0.1.0 (Hyprland-compatible IPC)
@@ -7,11 +7,11 @@ test windows: 2427890, 3082596, 3934364
 
 == tiling geometry (dwindle, gaps_in 5, gaps_out 20, scaled by monitor DPI)
     window 0 frame: 30,30,1882,2028   desired: 30,30,1882,2028
-    window 1 frame: 1928,30,1882,1006   desired: 1928,30,1882,1006
-    window 2 frame: 1928,1052,1882,1006   desired: 1928,1052,1882,1006
+    window 1 frame: 1928,1052,1882,1006   desired: 1928,1052,1882,1006
+    window 2 frame: 1928,30,1882,1006   desired: 1928,30,1882,1006
+  [PASS] frame of hyprwin-test-2 is pixel-exact actual=1928,30,1882,1006 desired=1928,30,1882,1006
+  [PASS] frame of hyprwin-test-1 is pixel-exact actual=1928,1052,1882,1006 desired=1928,1052,1882,1006
   [PASS] frame of hyprwin-test-0 is pixel-exact actual=30,30,1882,2028 desired=30,30,1882,2028
-  [PASS] frame of hyprwin-test-1 is pixel-exact actual=1928,30,1882,1006 desired=1928,30,1882,1006
-  [PASS] frame of hyprwin-test-2 is pixel-exact actual=1928,1052,1882,1006 desired=1928,1052,1882,1006
   [PASS] outer gap on the left = gaps_out minX=30 expected=30
   [PASS] gap between tiles = 2 x gaps_in gap=16 expected=16
 
@@ -33,14 +33,14 @@ test windows: 2427890, 3082596, 3934364
   [PASS] and hides it again 
 
 == layout dispatchers
-  [PASS] layoutmsg togglesplit changes geometry 1928,30,1882,2028 -> 30,1052,3780,1006
+  [PASS] layoutmsg togglesplit changes geometry 30,1052,3780,1006 -> 1928,30,1882,2028
   [PASS] resizeactive accepted 
   [PASS] unknown dispatcher reported, not fatal 
 
 == performance
-  [PASS] idle CPU ~0% (10 s sample) 0.000% of one core
-  [PASS] RAM under 30 MB working set=20.4 MB private=3.5 MB
-    20 dispatches round-trip via hyprwinctl: 9.8 ms each (includes process start)
+  [PASS] idle CPU ~0% (10 s sample) 0.313% of one core
+  [PASS] RAM under 30 MB working set=20.5 MB private=4 MB
+    20 dispatches round-trip via hyprwinctl: 10.8 ms each (includes process start)
 
 == keyboard binds (injected keystrokes)
   [PASS] Super+V toggles floating before=False after=True

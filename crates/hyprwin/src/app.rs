@@ -430,8 +430,13 @@ impl App {
         }
         let h = hwnd(id);
         unsafe {
-            if IsZoomed(h).as_bool() || IsIconic(h).as_bool() && !self.wm.windows.get(&id).is_some_and(|w| w.minimized) {
-                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+            // Never fight a minimize (e.g. "show desktop" minimizing everything
+            // while we are still re-tiling): a minimized window is left alone
+            // and the MINIMIZESTART event updates the model.
+            if IsIconic(h).as_bool() {
+                return;
+            }
+            if IsZoomed(h).as_bool() {
                 let _ = ShowWindow(h, SW_RESTORE);
             }
         }
@@ -565,6 +570,15 @@ impl App {
                 continue;
             }
             if self.in_movesize.contains(&id) || self.drag.as_ref().is_some_and(|d| d.id == id) || self.stubborn.contains(&id) {
+                continue;
+            }
+            // Minimized (its frame is parked off-screen by Windows): that is not
+            // the app moving itself. Make sure the model knows, and move on.
+            if unsafe { IsIconic(h).as_bool() } {
+                if !self.wm.windows[&id].minimized {
+                    let fx = self.wm.set_minimized(id, true);
+                    self.apply(fx);
+                }
                 continue;
             }
             let Some(desired) = self.wm.desired_rect(id) else { continue };
@@ -713,6 +727,10 @@ impl App {
             }
             EVENT_SYSTEM_MINIMIZEEND => {
                 if managed {
+                    // The restore animation moves the window for a moment; that
+                    // is not a fight.
+                    self.fights.remove(&id);
+                    self.placed_at.insert(id, Instant::now());
                     let fx = self.wm.set_minimized(id, false);
                     self.apply(fx);
                 } else {

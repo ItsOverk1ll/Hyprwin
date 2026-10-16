@@ -507,7 +507,7 @@ impl Wm {
 
     fn first_window_of(&self, ws: WsId) -> Option<WinId> {
         self.history.iter().rev().copied().find(|w| self.windows.get(w).is_some_and(|x| x.ws == ws && !x.minimized)).or_else(|| {
-            self.workspaces.get(&ws).and_then(|w| w.layout.windows().first().copied()).or_else(|| self.ws_windows(ws).find(|w| !w.minimized).map(|w| w.id))
+            self.layout_order(ws).first().copied().or_else(|| self.ws_windows(ws).find(|w| !w.minimized).map(|w| w.id))
         })
     }
 
@@ -717,7 +717,9 @@ impl Wm {
             return self.sync();
         }
         if minimized {
-            self.detach(id);
+            // The window keeps its slot in the layout tree (the others close up
+            // around it), so restoring it puts it back exactly where it was,
+            // even after "show desktop" minimizes and restores everything.
             let w = self.windows.get_mut(&id).unwrap();
             w.minimized = true;
             w.placed = None;
@@ -735,7 +737,10 @@ impl Wm {
             self.retry_auto_floats(ws);
         } else {
             self.windows.get_mut(&id).unwrap().minimized = false;
-            self.attach(id, None);
+            let ws = self.windows[&id].ws;
+            if !self.workspaces.get(&ws).is_some_and(|w| w.layout.contains(id)) {
+                self.attach(id, None);
+            }
             // Restoring a window on a hidden workspace brings that workspace up.
             let ws = self.windows[&id].ws;
             if !self.is_visible_ws(ws) && ws > 0 {
@@ -849,9 +854,15 @@ impl Wm {
                 _ => (0, 0),
             }
         };
-        let raw = match &w.layout {
-            Layout::Dwindle(d) => d.layout_min(area, &self.cfg.dwindle, &min),
-            Layout::Master(m) => m.layout(area, &self.cfg.master),
+        // Minimized windows keep their slot in the tree but take no space:
+        // lay out a pruned copy (their splits collapse like a removal).
+        let any_minimized = w.layout.windows().iter().any(|id| self.windows.get(id).is_some_and(|x| x.minimized));
+        let shown = |id: WinId| self.windows.get(&id).is_some_and(|x| !x.minimized);
+        let raw = match (&w.layout, any_minimized) {
+            (Layout::Dwindle(d), false) => d.layout_min(area, &self.cfg.dwindle, &min),
+            (Layout::Dwindle(d), true) => Dwindle::from_json(&d.to_json(), &shown).layout_min(area, &self.cfg.dwindle, &min),
+            (Layout::Master(m), false) => m.layout(area, &self.cfg.master),
+            (Layout::Master(m), true) => Master::from_json(&m.to_json(), &shown).layout(area, &self.cfg.master),
         };
         raw.into_iter()
             .map(|(id, r)| {
@@ -1228,7 +1239,7 @@ impl Wm {
             if self.ws_fits(ws) {
                 break;
             }
-            let tiled = self.workspaces.get(&ws).map(|w| w.layout.windows()).unwrap_or_default();
+            let tiled = self.layout_order(ws);
             if tiled.len() <= 1 {
                 break;
             }
@@ -1250,6 +1261,17 @@ impl Wm {
                 w.seq = i as u64 + 1;
             }
         }
+    }
+
+    /// Tiled windows of `ws` in layout order, without minimized ones.
+    fn layout_order(&self, ws: WsId) -> Vec<WinId> {
+        self.workspaces
+            .get(&ws)
+            .map(|w| w.layout.windows())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| self.windows.get(id).is_some_and(|x| !x.minimized))
+            .collect()
     }
 
     /// True when every tiled window on `ws` gets at least its minimum size.
@@ -1368,7 +1390,7 @@ impl Wm {
         let mon = self.focused_monitor;
         let ws = self.monitors[mon].special.unwrap_or(self.monitors[mon].active);
         let mut list: Vec<WinId> = match self.workspaces.get(&ws) {
-            Some(w) => w.layout.windows(),
+            Some(_) => self.layout_order(ws),
             None => Vec::new(),
         };
         list.extend(self.windows.values().filter(|w| w.ws == ws && w.floating && !w.minimized).map(|w| w.id));
@@ -1391,7 +1413,7 @@ impl Wm {
     pub fn swap_next(&mut self, forward: bool) -> Vec<Effect> {
         let Some(f) = self.focus else { return self.sync() };
         let Some(ws) = self.windows.get(&f).map(|w| w.ws) else { return self.sync() };
-        let list = self.workspaces[&ws].layout.windows();
+        let list = self.layout_order(ws);
         let Some(i) = list.iter().position(|&x| x == f) else { return self.sync() };
         if list.len() < 2 {
             return self.sync();
@@ -1772,7 +1794,7 @@ impl Wm {
             let name = s["name"].as_str().unwrap_or("").to_string();
             let mon = mon_idx(s["monitor"].as_str()).unwrap_or(0);
             self.ensure_ws(id, Some(&name), mon);
-            let tiled_here = |w: WinId| self.windows.get(&w).is_some_and(|x| x.ws == id && !x.floating && !x.minimized);
+            let tiled_here = |w: WinId| self.windows.get(&w).is_some_and(|x| x.ws == id && !x.floating);
             let layout = match s["layout"]["kind"].as_str() {
                 Some("master") => Layout::Master(Master::from_json(&s["layout"]["state"], &tiled_here)),
                 _ => Layout::Dwindle(Dwindle::from_json(&s["layout"]["tree"], &tiled_here)),
@@ -2049,6 +2071,43 @@ mod tests {
         wm.set_minimized(2, false);
         assert_eq!(wm.tiled_rects(1).len(), 2);
         assert_eq!(wm.focus, Some(2));
+    }
+
+    #[test]
+    fn show_desktop_round_trip_restores_identical_layout() {
+        let mut wm = wm1();
+        for i in 1..=5 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        wm.layout_msg("splitratio 0.3");
+        let before = wm.tiled_rects(1);
+        // "Show desktop": everything minimizes, in z-order...
+        for i in [3, 1, 5, 2, 4] {
+            wm.set_minimized(i, true);
+        }
+        assert!(wm.tiled_rects(1).is_empty());
+        // ...and is restored in a different order.
+        for i in [4, 2, 5, 1, 3] {
+            wm.set_minimized(i, false);
+        }
+        assert_eq!(wm.tiled_rects(1), before, "same windows in the same places");
+    }
+
+    #[test]
+    fn minimized_window_frees_its_space_and_gets_it_back() {
+        let mut wm = wm1();
+        for i in 1..=3 {
+            wm.add_window(i, tiled(Rect::default()));
+        }
+        let before = wm.tiled_rects(1);
+        wm.set_minimized(2, true);
+        let during = wm.tiled_rects(1);
+        assert_eq!(during.len(), 2);
+        let area: i64 = during.iter().map(|(_, r)| r.w as i64 * r.h as i64).sum();
+        let full: i64 = before.iter().map(|(_, r)| r.w as i64 * r.h as i64).sum();
+        assert!(area >= full, "the others take over its space");
+        wm.set_minimized(2, false);
+        assert_eq!(wm.tiled_rects(1), before);
     }
 
     #[test]
