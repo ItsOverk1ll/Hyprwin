@@ -1,0 +1,157 @@
+# Hyprland parity
+
+Status of every Hyprland feature in hyprwin.
+
+- ✅ done
+- 🟡 approximated (how is explained)
+- ❌ impossible on Windows (why is explained)
+- ⏳ planned (phase)
+
+The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see ADR-001).
+
+## Layouts
+
+| Feature | Status | Notes |
+|---|---|---|
+| dwindle layout | ✅ | BSP tree. Split direction comes from W/H × `split_width_multiplier`. |
+| `force_split` 0/1/2 | ✅ | 0 uses the cursor position. |
+| `preserve_split` | ✅ | |
+| `default_split_ratio`, `use_active_for_splits`, `permanent_direction_override`, `special_scale_factor` | ✅ | |
+| `smart_split`, `smart_resizing`, `split_bias`, `precise_mouse_move` | ⏳ P3 | Accepted silently. |
+| layoutmsg `togglesplit` | ✅ | Also works without `preserve_split`: the toggled split is locked. This is a superset of Hyprland's behaviour. |
+| layoutmsg `swapsplit`, `preselect`, `splitratio [exact]` | ✅ | |
+| layoutmsg `movetoroot`, `rotatesplit` | ⏳ P3 | |
+| pseudotile (`pseudo`) | ✅ | The window's natural size is centred in its tile. |
+| master layout | ✅ | |
+| `mfact`, `new_status` (master/slave/inherit), `new_on_top`, `orientation` left/right/top/bottom/center, `slave_count_for_center_master`, `allow_small_split` | ✅ | |
+| master layoutmsg `swapwithmaster`, `focusmaster`, `cyclenext/prev`, `swapnext/prev`, `addmaster`, `removemaster`, `orientation*`, `mfact`, `rollnext/prev` | ✅ | |
+| `new_on_active`, `drop_at_cursor`, `always_keep_position`, `center_master_fallback` other than left | ⏳ P3 | |
+| scrolling layout (0.55+), custom Lua layouts | ⏳ later | |
+| `gaps_in`, `gaps_out` (incl. CSS 1–4 values) | ✅ | Pixel-exact after invisible-border correction (verified live). Scaled by monitor DPI, like Hyprland's logical px. |
+| per-workspace gaps (`workspace = N, gapsin:, gapsout:`) | ✅ | |
+
+## Dispatchers
+
+| Dispatcher | Status | Notes |
+|---|---|---|
+| `exec`, `execr` | ✅ | Runs through `cmd /C`, detached, with no console. `exec [rules] cmd` rules are ⏳ P3 (stripped for now). |
+| `killactive`, `closewindow` | ✅ | Graceful `WM_CLOSE`. |
+| `forcekillactive`, `killwindow` | ✅ | `TerminateProcess`. |
+| `workspace` (id, `+N`/`-N`, `r±N`, `m±N`, `e±N`, `name:`, `previous`, `empty`, `special[:name]`) | ✅ | |
+| `movetoworkspace`, `movetoworkspacesilent` (incl. `,window` selector) | ✅ | |
+| `togglespecialworkspace [name]` | ✅ | Shown as an overlay: raised above the regular workspace. |
+| `togglefloating`, `setfloating`, `settiled` | ✅ | |
+| `fullscreen 0` | 🟡 | The frame covers the monitor and the window is marked fullscreen for the taskbar. The app's own title bar stays visible unless the app supports true fullscreen (F11). Restyling other apps' windows is unsafe. |
+| `fullscreen 1` (maximize) | ✅ | Work area minus outer gaps. The app's own maximize button maps to this. |
+| `fullscreenstate` | 🟡 | Mapped onto `fullscreen 0/1`. |
+| `pin` | ✅ | Floating only, as in Hyprland. Follows workspace switches on its monitor. |
+| `pseudo` | ✅ | |
+| `movefocus` | ✅ | Crosses monitors at the edge. |
+| `movewindow l/r/u/d` | ✅ | Crosses monitors at the edge. |
+| `movewindow mon:` | ✅ | |
+| `swapwindow` | ✅ | |
+| `centerwindow` | ✅ | Floating. |
+| `resizeactive`, `moveactive` (px, %, `exact`) | ✅ | |
+| `resizewindowpixel`, `movewindowpixel` | ⏳ P3 | |
+| `cyclenext [prev] [tiled] [floating]`, `swapnext` | ✅ | |
+| `focuswindow` (class/title/initialclass/initialtitle/pid/address/floating/tiled) | ✅ | |
+| `focusmonitor` (dir, ±1, name, id) | ✅ | |
+| `focuscurrentorlast` | ✅ | |
+| `focusurgentorlast` | 🟡 | Same as `focuscurrentorlast`: flash/urgency hints aren't tracked yet. |
+| `focusworkspaceoncurrentmonitor` | ✅ | |
+| `layoutmsg` | ✅ | See Layouts. |
+| `submap` (incl. `reset`) | ✅ | |
+| `exit` | ✅ | Restores every window first. |
+| `bringactivetotop`, `alterzorder` | ✅ | |
+| `forcerendererreload` | 🟡 | Reloads the config. |
+| `movecurrentworkspacetomonitor`, `moveworkspacetomonitor`, `swapactiveworkspaces`, `renameworkspace` | ⏳ P2 | |
+| `movecursor`, `movecursortocorner` | ⏳ P3 | |
+| `tagwindow`, `setprop`, `toggleswallow`, `event`, `signal(window)` | ⏳ P3 / ❌ | `signal` is ❌: Windows has no POSIX signals. |
+| `pass`, `sendshortcut`, `sendkeystate`, `global` | ⏳ P3 | |
+| `dpms`, `forceidle` | ❌ | Display power and idle are owned by Windows. |
+| groups: `togglegroup`, `changegroupactive`, `moveintogroup`, … | ⏳ P5 | |
+
+## Binds
+
+| Feature | Status | Notes |
+|---|---|---|
+| `bind = MODS, key, dispatcher, args` | ✅ | |
+| Mods SUPER/SHIFT/CTRL/ALT (`_`, space or `+` separated), MOD4, `$vars` | ✅ | |
+| Keysyms: letters, digits, F1–F24, arrows, Return, Tab, Escape, space, punctuation, KP_*, XF86Audio*, `code:NN` | ✅ | |
+| `mouse:272–276`, `mouse_up` / `mouse_down` | ✅ | |
+| flag `e` (repeat), `r` (release), `l` (locked), `n` (non-consuming), `m` (mouse), `i` (ignore mods), `d` (description), `t` | ✅ | `l` is accepted, but LL hooks never see the lock screen anyway. |
+| flags `o` (long press), `c` (click), `g` (drag), `s` (keysym combos), `p`, `k` (per-device) | ⏳ P3 / ❌ | `k`: Windows merges all keyboards. |
+| `bindm` movewindow / resizewindow (Super+LMB/RMB) | ✅ | Any window, tiled or floating. Tiled resize updates the layout live; a tiled drop re-inserts next to the window under the cursor. |
+| `unbind` | ✅ | |
+| submaps (incl. nested), `submap = reset` | ✅ | |
+| modifier-only binds (`bindr = SUPER, SUPER_L, …`) | ⏳ P3 | |
+| Super combos never open the Start menu | ✅ | `vkE8` mask (verified live). |
+| **Super+L** | ❌ | Win+L is enforced by winlogon. An opt-in `DisableLockWorkstation` policy (asks you first) will free it. |
+| Ctrl+Alt+Del | ❌ | Secure attention sequence. |
+| Binds while an admin window is focused | ❌ (default) / ⏳ | UIPI blocks LL hooks over elevated windows unless hyprwin runs elevated (opt-in, ADR-001). |
+
+## Config file
+
+| Feature | Status | Notes |
+|---|---|---|
+| hyprlang syntax: sections, `cat:key =`, `$vars`, `source =` (with `*`), comments, `##` | ✅ | |
+| `windowrulev2 = …` | ✅ | |
+| legacy `windowrule = effect, regex` | ✅ | |
+| `windowrule = match:…, effect` (0.48+) | ✅ | |
+| `windowrule { … }` blocks | ✅ | |
+| rule props `class`, `title`, `initial_class`, `initial_title`, `float`, `fullscreen`, `pin`, `focus`, `workspace`, `xwayland`, `negative:` | ✅ | Plus extensions `winclass` (Win32 class) and `exe` (path). |
+| rule effects `float`, `tile`, `fullscreen`, `maximize`, `pin`, `pseudo`, `center`, `size`, `move` (px/%), `workspace [silent]`, `monitor`, `noinitialfocus`, `nofocus`, `rounding`, `bordercolor` | ✅ | Applied when the window opens. Dynamic re-evaluation is ⏳ P3. |
+| `size`/`move` expressions (`monitor_w*0.5`) | ⏳ P3 | |
+| `opacity` | ⏳ P4 | Opt-in, via layered windows (can break some apps). |
+| `noanim`, `animation` | ⏳ P4 | |
+| `idleinhibit`, `suppressevent`, `stayfocused`, `dimaround`, `noblur`, `noshadow`, … | 🟡 / ❌ | Warned. Some come in P3; blur and shadow are ❌. |
+| hyprwin extension `unmanaged` | ✅ | |
+| `workspace =` rules (`monitor:`, `default:`, `persistent:`, `gapsin:`, `gapsout:`, `layout:`) | ✅ | |
+| `exec-once`, `exec`, `exec-shutdown`, `env` | ✅ | |
+| `monitor =` resolution/position/scale | ❌ | Set in Windows Display settings. `addreserved` is ✅. |
+| hot reload on save | ✅ | Also `hyprwinctl reload`. |
+| unknown options | ✅ | A warning naming file and line, never an error. Wayland-only groups are summarised in one line. |
+| `class` mapping | ✅ | The process name without `.exe`, case-insensitive. UWP apps resolve through ApplicationFrameHost to the real app. |
+| Lua config (Hyprland 0.55+) | ⏳ | After hyprlang (per ADR). |
+
+## Workspaces & monitors
+
+| Feature | Status | Notes |
+|---|---|---|
+| per-monitor workspaces 1–10+, named workspaces | ✅ | Hidden with the shell cloak, so windows stay alive. Falls back to off-screen parking. |
+| special workspaces (scratchpad), named | ✅ | |
+| empty workspaces destroyed, `persistent` kept | ✅ | |
+| `binds:workspace_back_and_forth` | ✅ | |
+| monitor hotplug / resolution / DPI change | ✅ | Workspaces move to a remaining monitor. Re-detected on `WM_DISPLAYCHANGE`/`WM_DPICHANGED`/work-area change/resume. |
+| persist layout across daemon restarts | ⏳ P2 | |
+| mixed-DPI multi-monitor | ✅ (model) / ⏳ (manual test) | |
+
+## Look & feel
+
+| Feature | Status | Notes |
+|---|---|---|
+| active/inactive border colour | ✅ | `DWMWA_BORDER_COLOR`. |
+| border width, gradient borders | 🟡 | DWM borders are about 1 px and solid; a gradient uses its first colour. Overlay borders (any width/gradient) are ⏳ P4, cost to be measured. |
+| `rounding` | 🟡 | Snaps to Windows' presets: 0 → square, 1–5 → small (4 px), 6+ → round (8 px). Arbitrary radii are ❌. |
+| animations (`animation =`, `bezier =`) | ⏳ P4 | Parsed now. The engine (DWM-thumbnail overlay) is proven in `spikes/animation`: 240 Hz, 0 late frames. |
+| blur, shadows, dim on other apps | ❌ | DWM owns composition. Our own bar and overlays can use acrylic/mica. |
+| hide taskbar | ⏳ P4 | Recorded in the ledger, so it's always restored. |
+| `decoration:active_opacity` / `inactive_opacity` | ⏳ P4 | Opt-in. |
+
+## IPC
+
+| Feature | Status | Notes |
+|---|---|---|
+| `hyprwinctl dispatch`, `clients`, `workspaces`, `activeworkspace`, `monitors`, `activewindow`, `binds`, `version`, `reload`, `-j`, `--batch` | ✅ | Hyprland-shaped JSON. |
+| `hyprwinctl debug` | ✅ | Every top-level window with class/process/styles/verdict, for writing rules and filing bugs. |
+| event stream (socket2) | ✅ | `hyprwinctl events`, or connect to `\\.\pipe\hyprwin-events-<user>`. |
+| events emitted | ✅ | `workspace(v2)`, `focusedmon`, `activewindowv2`, `openwindow`, `closewindow`, `movewindow(v2)`, `createworkspace`, `destroyworkspace`, `activespecial`, `changefloatingmode`, `fullscreen`, `pin`, `minimized`, `submap`, `windowtitle(v2)`, `configreloaded`. |
+| `keyword`, `getoption`, `notify`, `seterror`, `setcursor`, `switchxkblayout` | ⏳ P3 | |
+
+## Ecosystem
+
+| Feature | Status | Notes |
+|---|---|---|
+| status bar (Waybar-like) | ⏳ P5 | Our own native Rust bar on the event pipe. |
+| launcher | 🟡 | `$menu` opens the Apps folder by default; bind any launcher with `exec`. |
+| groups / tabbed | ⏳ P5 | |
