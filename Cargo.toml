@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
-repository = "https://github.com/Wyatt852456/Hyprwin"
+repository = "https://github.com/ItsOverk1ll/Hyprwin"
 
 [workspace.dependencies]
 hyprwin-anim = { path = "crates/hyprwin-anim" }
