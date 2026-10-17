@@ -21,6 +21,22 @@ use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindowVisib
 /// the reveal strip). Read by `monitor_specs`.
 static HIDDEN: Mutex<Vec<(isize, Rect)>> = Mutex::new(Vec::new());
 
+/// Reveal strips of the hidden taskbars, computed on first use after the
+/// taskbars or monitors change (not on every mouse move).
+static STRIPS: Mutex<Option<Vec<Rect>>> = Mutex::new(None);
+
+/// Monitors changed: the reveal strips must be recomputed.
+pub fn monitors_changed() {
+    if let Ok(mut s) = STRIPS.lock() {
+        *s = None;
+    }
+}
+
+fn strips() -> Vec<Rect> {
+    let mut cache = STRIPS.lock().unwrap_or_else(|e| e.into_inner());
+    cache.get_or_insert_with(|| hidden_rects().into_iter().map(edge_strip).collect()).clone()
+}
+
 /// How long the mouse may be away before a revealed taskbar hides again.
 const LEAVE_DELAY: Duration = Duration::from_millis(500);
 
@@ -85,12 +101,14 @@ pub fn hide_all(record: &mut dyn FnMut(&[isize])) -> usize {
     if let Ok(mut v) = HIDDEN.lock() {
         *v = bars;
     }
+    monitors_changed();
     n
 }
 
 /// Shows every taskbar hyprwin hid. Returns the HWNDs (to drop from the ledger).
 pub fn show_all() -> Vec<isize> {
     let bars = HIDDEN.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+    monitors_changed();
     for (h, _) in &bars {
         unsafe {
             let _ = ShowWindow(HWND(*h as *mut _), SW_SHOWNA);
@@ -149,8 +167,8 @@ impl Reveal {
         if self.shown || !is_hidden() {
             return false;
         }
-        let bars = HIDDEN.lock().map(|v| v.clone()).unwrap_or_default();
-        if bars.iter().any(|(_, r)| inside(edge_strip(*r), x, y)) {
+        if strips().iter().any(|r| inside(*r, x, y)) {
+            let bars = HIDDEN.lock().map(|v| v.clone()).unwrap_or_default();
             for (h, _) in &bars {
                 unsafe {
                     let _ = ShowWindow(HWND(*h as *mut _), SW_SHOWNA);

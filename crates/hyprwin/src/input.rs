@@ -60,6 +60,9 @@ pub struct Shared {
     pub submap: AtomicU32,
     pub main: AtomicIsize,
     pub follow_mouse: AtomicBool,
+    /// The taskbar is hidden: the main thread needs mouse moves to reveal it
+    /// at the screen edge, even without focus-follows-mouse.
+    pub watch_edges: AtomicBool,
     mouse_pending: AtomicBool,
     last_mouse: AtomicU64,
     /// 0 = none, 1 = left, 2 = right
@@ -74,6 +77,7 @@ pub fn shared() -> &'static Shared {
         submap: AtomicU32::new(0),
         main: AtomicIsize::new(0),
         follow_mouse: AtomicBool::new(true),
+        watch_edges: AtomicBool::new(false),
         mouse_pending: AtomicBool::new(false),
         last_mouse: AtomicU64::new(0),
         drag_button: AtomicU8::new(0),
@@ -293,7 +297,8 @@ fn handle_mouse(msg: u32, m: &MSLLHOOKSTRUCT) -> bool {
     let pos = pack(m.pt.x, m.pt.y);
     if msg == WM_MOUSEMOVE {
         sh.last_mouse.store(pos, Ordering::Release);
-        if (sh.follow_mouse.load(Ordering::Relaxed) || sh.drag_button.load(Ordering::Relaxed) != 0) && !sh.mouse_pending.swap(true, Ordering::AcqRel) {
+        let wanted = sh.follow_mouse.load(Ordering::Relaxed) || sh.watch_edges.load(Ordering::Relaxed) || sh.drag_button.load(Ordering::Relaxed) != 0;
+        if wanted && !sh.mouse_pending.swap(true, Ordering::AcqRel) {
             post(WM_APP_MOUSE, 0, pos);
         }
         return false;

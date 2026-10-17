@@ -419,6 +419,7 @@ impl App {
         if paused {
             self.save_state();
             crate::taskbar::show_all();
+            input::shared().watch_edges.store(false, std::sync::atomic::Ordering::Relaxed);
             self.restore_everything();
             self.wm = Wm::new(self.cfg.wm.clone(), monitor_specs(&self.cfg));
             self.meta.clear();
@@ -1431,6 +1432,7 @@ impl App {
     /// Hides or shows the Windows taskbar to match `hyprwin:hide_taskbar`.
     pub fn apply_taskbar(&mut self) {
         let want = self.cfg.hide_taskbar && !self.paused;
+        input::shared().watch_edges.store(want, std::sync::atomic::Ordering::Relaxed);
         if want == crate::taskbar::is_hidden() {
             return;
         }
@@ -1471,6 +1473,7 @@ impl App {
     }
 
     pub fn refresh_monitors(&mut self) {
+        crate::taskbar::monitors_changed();
         let specs = monitor_specs(&self.cfg);
         info!("monitors changed: {}", specs.iter().map(|m| format!("{} {:?}@{}", m.name, m.rect, m.scale)).collect::<Vec<_>>().join(", "));
         let fx = self.wm.set_monitors(specs);
