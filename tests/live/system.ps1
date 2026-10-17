@@ -119,7 +119,8 @@ try {
         Start-Sleep -Milliseconds 2500
         $mon = (Ctl -j monitors | ConvertFrom-Json)[0]
         Check 'daemon picked up the new resolution' ($mon.width -eq $target.dmPelsWidth -and $mon.height -eq $target.dmPelsHeight) "monitor=$($mon.width)x$($mon.height)"
-        $c = Ctl -j clients | ConvertFrom-Json | Where-Object { -not $_.hidden }
+        # (Windows PowerShell passes ConvertFrom-Json's array down a pipe as one item.)
+        $c = @(Ctl -j clients | ConvertFrom-Json) | ForEach-Object { $_ } | Where-Object { -not $_.hidden }
         $right = ($c | ForEach-Object { $_.at[0] + $_.size[0] } | Measure-Object -Maximum).Maximum
         Check 'tiles fill the new width' ([math]::Abs($right - ($mon.width - 20)) -le 2) "right edge=$right width=$($mon.width)"
         $bad = Consistent
