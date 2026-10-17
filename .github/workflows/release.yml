@@ -1,0 +1,53 @@
+# Publishes a release when a version tag is pushed:
+#   (bump `version` in Cargo.toml, commit)  git tag v0.3.0 && git push origin v0.3.0
+# Builds the installer zip with scripts/package.ps1 and attaches it. If a
+# release for the tag already exists, the zip is (re)uploaded to it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish, e.g. v0.3.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tag matches Cargo.toml version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ("v$v" -ne $env:TAG) { throw "Tag $env:TAG does not match Cargo.toml version $v. Bump the version first." }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Build installer zip
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package.ps1
+      - name: Publish release
+        shell: pwsh
+        run: |
+          $zip = "dist\hyprwin-$env:VERSION-windows-x64.zip"
+          if (-not (Test-Path $zip)) { throw "missing $zip" }
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $zip --clobber
+          } else {
+            gh release create $env:TAG $zip --title "hyprwin $env:VERSION" --generate-notes
+          }

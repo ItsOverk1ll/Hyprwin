@@ -1,0 +1,23 @@
+# Builds everything and runs the unit tests on every push and pull request.
+# (The live tests in tests/live need a real Windows desktop session and are
+# run locally; see docs/testing.md.)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release)
+        run: cargo build --release --workspace
+      - name: Unit tests
+        run: cargo test --workspace
