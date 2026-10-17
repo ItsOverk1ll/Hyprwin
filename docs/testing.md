@@ -3,7 +3,7 @@
 ## Automated
 
 ```powershell
-cargo test --workspace                                                # 119 unit tests (layout, config, animation, ledger)
+cargo test --workspace                                                # unit tests (layout, config, animation, ledger) + stress and fuzz tests below
 cargo build --release
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1                   # 36 live checks
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\overflow.ps1                 # min-size overflow to the next workspace
@@ -19,6 +19,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\setup.ps1        
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update
 ```
+
+`cargo test` also runs two randomized suites (fixed seeds, so failures reproduce):
+- `crates/hyprwin-layout/tests/stress.rs`: long random sequences of window, workspace, monitor, floating, fullscreen, pin, minimum-size and restart operations under random configs, checking the model's invariants after every step. Bigger runs: `STRESS_SEEDS=4000 STRESS_STEPS=600 cargo test --release -p hyprwin-layout --test stress`. Reproduce one: `STRESS_SEED=<n>`, add `STRESS_TRACE=1` to print the model after each step, `STRESS_TIME=1` to time each operation.
+- `crates/hyprwin-config/tests/fuzz.rs`: mutated configs and junk thrown at every parser; no input may panic the daemon.
 
 The live tests set two variables so they never touch your session:
 - `HYPRWIN_MANAGE_ONLY`: the daemon manages only the test's own coloured windows.

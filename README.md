@@ -79,6 +79,7 @@ Settings and themes are written to `%APPDATA%\hyprwin\settings.conf` and to a sm
 - [docs/research.md](docs/research.md): what Windows allows, and why
 - [docs/parity.md](docs/parity.md): every Hyprland feature and its status
 - [docs/testing.md](docs/testing.md): automated tests and the manual checklist
+- [docs/cloud-changes.md](docs/cloud-changes.md): review guide for the Cloud-Changes branch
 - [spikes/animation](spikes/animation/README.md): how animations will work, with measurements
 
 ## License
