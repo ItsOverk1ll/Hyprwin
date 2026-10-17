@@ -33,6 +33,9 @@ public static class S8 {
   [DllImport("shell32.dll")] public static extern int Shell_NotifyIconGetRect(ref NII id, out RC8 r);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 }
 '@
 [void][S8]::SetProcessDpiAwarenessContext([IntPtr](-4))
@@ -102,6 +105,22 @@ try {
     Ctl dispatch workspace 1 | Out-Null; Start-Sleep -Milliseconds 900
     $bad = Consistent
     Check 'and back' ($bad.Count -eq 0) ($bad -join '; ')
+
+    Write-Host "`n== a window on a hidden workspace is activated (taskbar click, app coming forward)"
+    Ctl dispatch workspace 1 | Out-Null; Start-Sleep -Milliseconds 800
+    $h3 = Hwnd 'hyprwin-sys-3'
+    # A key press first: Windows only lets the process with the last input change focus.
+    [S8]::keybd_event(0xE8, 0, 0, [UIntPtr]::Zero); [S8]::keybd_event(0xE8, 0, 2, [UIntPtr]::Zero)
+    [void][S8]::SetForegroundWindow($h3)
+    Start-Sleep -Milliseconds 1500
+    $ws = ((Ctl -j activeworkspace) | ConvertFrom-Json).id
+    Check 'hyprwin switches to its workspace' ($ws -eq 2) "ws=$ws"
+    Check 'and the window is shown' ((Cloaked $h3) -eq 0) "cloaked=$(Cloaked $h3)"
+    Start-Sleep -Milliseconds 1500
+    $ws2 = ((Ctl -j activeworkspace) | ConvertFrom-Json).id
+    $bad = Consistent
+    Check 'no flapping back, model matches the screen' ($ws2 -eq $ws -and $bad.Count -eq 0) "ws=$ws2 $($bad -join '; ')"
+    Ctl dispatch workspace 1 | Out-Null; Start-Sleep -Milliseconds 800
 
     Write-Host "`n== the screen resolution changes"
     $modes = @(); $i = 0; $m = New-Object DEVMODE; $m.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($m)
