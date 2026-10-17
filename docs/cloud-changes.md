@@ -93,6 +93,11 @@ Both builds run the same, newest test scripts.
 | **system** (explorer killed and restarted, live resolution change) | 13/13 | a window moved to a hidden workspace stays visible (the uncloak bug, from plain commands) |
 | **keys** (Super release lost as on Win+L, lost release of a bound key, 300 mashed chords) | 10/10 | plain `J` fired Super+J and plain `Shift+K` fired Super+Shift+K: **ordinary typing ran hotkeys**; a bound key stopped working after a lost release |
 
+| **setup** (packaged zip: install, update in place, uninstall) | 23/23 | 23/23 |
+| **soak** (10 min, 5,658 random commands, windows opening/dying, minimize storms; `[soak]` commits) | handles 204 → 213, GDI 8 → 8, USER 17 → 19, memory 3.1–6 MB without a trend, threads flat; model matches the screen | not run |
+
+All 15 suites pass on `Cloud-Changes`: 288 checks.
+
 Machine-specific fixes to the suites: minimum sizes in `overflow.ps1` are now
 fractions of the monitor (fixed sizes broke on small screens), and every suite's
 `Kill-Hyprwin` tolerates a process exiting while it is being killed.
