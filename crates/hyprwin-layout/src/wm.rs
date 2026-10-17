@@ -1881,6 +1881,16 @@ impl Wm {
         }
     }
 
+    /// [`workspace_layout_json`](Self::workspace_layout_json) with only the
+    /// windows `keep` accepts (the others' splits collapse).
+    pub fn workspace_layout_json_keeping(&self, ws: WsId, keep: &dyn Fn(WinId) -> bool) -> serde_json::Value {
+        match self.workspaces.get(&ws).map(|w| &w.layout) {
+            Some(Layout::Dwindle(d)) => serde_json::json!({ "kind": "dwindle", "tree": Dwindle::from_json(&d.to_json(), keep).to_json() }),
+            Some(Layout::Master(m)) => serde_json::json!({ "kind": "master", "state": Master::from_json(&m.to_json(), keep).to_json() }),
+            None => serde_json::Value::Null,
+        }
+    }
+
     /// Replaces `ws`'s tiled arrangement with a saved one (App Groups). Only
     /// windows that are tiled on `ws` are kept from the saved tree; tiled
     /// windows on `ws` that the tree does not mention are inserted normally.
@@ -2666,5 +2676,29 @@ mod tests {
         let mut wm = Wm::new(WmConfig::default(), vec![MonitorSpec { scale: 1.5, ..mon("A", 0) }]);
         wm.add_window(1, tiled(Rect::default()));
         assert_eq!(wm.desired_rect(1), Some(Rect::new(30, 30, 1860, 1020)));
+    }
+
+    #[test]
+    fn layout_json_keeping_drops_other_windows() {
+        let mut wm = wm1();
+        for id in 1..=3 {
+            wm.add_window(id, tiled(Rect::new(100, 100, 400, 300)));
+        }
+        wm.set_minimized(2, true);
+        let v = wm.workspace_layout_json_keeping(1, &|w| w != 2);
+        let mut ids = Vec::new();
+        fn walk(v: &serde_json::Value, out: &mut Vec<u64>) {
+            if let Some(w) = v.get("w").and_then(|w| w.as_u64()) {
+                out.push(w);
+            }
+            for k in ["a", "b", "tree"] {
+                if let Some(c) = v.get(k) {
+                    walk(c, out);
+                }
+            }
+        }
+        walk(&v, &mut ids);
+        ids.sort();
+        assert_eq!(ids, vec![1, 3]);
     }
 }

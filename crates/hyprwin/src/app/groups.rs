@@ -123,7 +123,10 @@ impl App {
                 "float_rect": [w.float_rect.x, w.float_rect.y, w.float_rect.w, w.float_rect.h],
             }));
         }
-        let mut layout = self.wm.workspace_layout_json(ws);
+        // Only members may stay in the tree: a minimized window keeps its tile
+        // there, and as a non-member it would be renumbered to slot 0 and
+        // take the first app's place when the group is opened.
+        let mut layout = self.wm.workspace_layout_json_keeping(ws, &|w| members.contains(&w));
         remap_layout_ids(&mut layout, &|w| members.iter().position(|&m| m == w).map(|i| i as u64));
         let doc = json!({ "version": 1, "name": name, "layout": layout, "apps": apps });
         std::fs::create_dir_all(paths::groups_dir()).map_err(|e| e.to_string())?;
