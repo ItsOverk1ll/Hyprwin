@@ -38,11 +38,41 @@ const MAX_FILES: usize = 256;
 pub fn parse_file(path: &Path) -> Parsed {
     let mut p = Parsed::default();
     let mut vars: Vec<(String, String)> = Vec::new();
-    match std::fs::read_to_string(path) {
+    match read_text(path, &mut p.warnings) {
         Ok(text) => parse_into(&text, path, &mut vars, &mut p, &mut Vec::new()),
         Err(e) => p.warnings.push(format!("{}: cannot read: {e}", path.display())),
     }
     p
+}
+
+/// Reads a config file whatever Notepad saved it as: UTF-8 (with or without
+/// a BOM), UTF-16 ("Unicode"), or legacy "ANSI" bytes. Before, one non-UTF-8
+/// byte (an accented comment) made the whole file unreadable, and hyprwin ran
+/// with no config at all.
+pub fn read_text(path: &Path, warnings: &mut Vec<String>) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(decode_text(&bytes, &path.display().to_string(), warnings))
+}
+
+fn decode_text(bytes: &[u8], name: &str, warnings: &mut Vec<String>) -> String {
+    let utf16 = |be: bool| -> String {
+        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| if be { u16::from_be_bytes([c[0], c[1]]) } else { u16::from_le_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xEF, 0xBB, 0xBF, rest @ ..] => decode_text(rest, name, warnings),
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        _ => match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                warnings.push(format!("{name}: not UTF-8; read as Windows-1252 (save it as UTF-8 to be sure)"));
+                // Windows-1252 differs from Latin-1 only in 0x80..0x9F; those are
+                // punctuation that never matters to the config syntax.
+                bytes.iter().map(|&b| b as char).collect()
+            }
+        },
+    }
 }
 
 pub fn parse_str(text: &str, name: &str) -> Parsed {
@@ -110,6 +140,7 @@ fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &m
     }
     out.files.push(file.to_path_buf());
     chain.push(file.to_path_buf());
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let fname = file.display().to_string();
     let mut sections: Vec<String> = Vec::new();
     let mut block: Option<(String, Vec<(String, String)>, usize)> = None;
@@ -183,7 +214,7 @@ fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &m
                     out.warnings.push(format!("{fname}:{lineno}: source {}: more than {MAX_FILES} files sourced; skipped", path.display()));
                     continue;
                 }
-                match std::fs::read_to_string(&path) {
+                match read_text(&path, &mut out.warnings) {
                     Ok(t) => parse_into(&t, &path, vars, out, chain),
                     Err(e) => out.warnings.push(format!("{fname}:{lineno}: source {}: {e}", path.display())),
                 }
@@ -291,5 +322,21 @@ mod tests {
         assert!(p.warnings.iter().any(|w| w.contains("source loop")));
         assert!(p.entries.iter().any(|e| e.key == "general:gaps_out"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn any_notepad_encoding_loads() {
+        let body = "# caf\u{e9}\ngeneral {\n    gaps_in = 7\n}\n";
+        let utf16le: Vec<u8> = [0xFF, 0xFE].into_iter().chain(body.encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
+        let utf16be: Vec<u8> = [0xFE, 0xFF].into_iter().chain(body.encode_utf16().flat_map(|u| u.to_be_bytes())).collect();
+        let bom8: Vec<u8> = [0xEF, 0xBB, 0xBF].into_iter().chain(body.bytes()).collect();
+        let ansi: Vec<u8> = body.chars().map(|c| c as u32 as u8).collect();
+        for (name, bytes) in [("utf16le", utf16le), ("utf16be", utf16be), ("utf8bom", bom8), ("ansi", ansi), ("utf8", body.as_bytes().to_vec())] {
+            let mut w = Vec::new();
+            let text = decode_text(&bytes, name, &mut w);
+            let p = parse_str(&text, name);
+            assert!(p.entries.iter().any(|e| e.key == "general:gaps_in" && e.value == "7"), "{name}: {:?} {:?}", p.entries, p.warnings);
+            assert_eq!(w.is_empty(), name != "ansi", "{name}: {w:?}");
+        }
     }
 }

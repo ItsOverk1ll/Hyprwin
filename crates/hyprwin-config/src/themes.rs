@@ -161,16 +161,55 @@ pub fn active_theme(config_text: &str) -> Option<PathBuf> {
 }
 
 /// Returns `config_text` with the managed block replaced (or appended).
+/// Only the text between the markers is ever replaced: a start marker whose
+/// end marker is missing or misplaced (edited by hand) loses just its own
+/// line, and a fresh block is appended. Nothing the user wrote is dropped.
 pub fn with_managed_block(config_text: &str, theme: Option<&Path>) -> String {
     let block = managed_block(theme);
-    if let (Some(s), Some(e)) = (config_text.find(BLOCK_START), config_text.find(BLOCK_END)) {
-        let end = e + BLOCK_END.len();
-        let end = if config_text[end..].starts_with("\r\n") { end + 2 } else if config_text[end..].starts_with('\n') { end + 1 } else { end };
-        format!("{}{}{}", &config_text[..s], block, &config_text[end..])
-    } else {
-        let sep = if config_text.ends_with('\n') || config_text.is_empty() { "\n" } else { "\n\n" };
-        format!("{config_text}{sep}{block}")
+    let append = |text: &str| {
+        let sep = if text.ends_with('\n') || text.is_empty() { "\n" } else { "\n\n" };
+        format!("{text}{sep}{block}")
+    };
+    let Some(s) = config_text.find(BLOCK_START) else { return append(config_text) };
+    match config_text[s..].find(BLOCK_END) {
+        Some(e) => {
+            let end = s + e + BLOCK_END.len();
+            let end = if config_text[end..].starts_with("\r\n") { end + 2 } else if config_text[end..].starts_with('\n') { end + 1 } else { end };
+            format!("{}{}{}", &config_text[..s], block, &config_text[end..])
+        }
+        None => {
+            let line_end = config_text[s..].find('\n').map(|i| s + i + 1).unwrap_or(config_text.len());
+            append(&format!("{}{}", &config_text[..s], &config_text[line_end..]))
+        }
     }
+}
+
+/// Reads the user's config for rewriting. A missing file is empty; a file
+/// that can't be read, or isn't UTF-8 (Notepad "ANSI" or "Unicode"), is an
+/// error: rewriting what we could not read would wipe the user's config.
+fn read_for_edit(config: &Path) -> std::io::Result<String> {
+    match std::fs::read(config) {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{} is not saved as UTF-8, so hyprwin won't rewrite it. Save it as UTF-8 (Notepad: File > Save as > Encoding) and try again.", config.display()),
+            )
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Replaces the config atomically (temp file + rename), after keeping a
+/// one-time copy of the user's original next to it.
+fn write_for_edit(config: &Path, text: &str) -> std::io::Result<()> {
+    let backup = config.with_extension("conf.before-hyprwin");
+    if config.exists() && !backup.exists() {
+        let _ = std::fs::copy(config, &backup);
+    }
+    let tmp = config.with_extension("conf.hyprwin-tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, config)
 }
 
 /// Makes sure the user's config has the managed block and settings.conf exists.
@@ -182,23 +221,24 @@ pub fn ensure_managed_block(config: &Path) -> std::io::Result<()> {
     if !paths::binds_conf().exists() {
         std::fs::write(paths::binds_conf(), crate::binds_file::BindsFile::default().render())?;
     }
-    let text = std::fs::read_to_string(config).unwrap_or_default();
+    let text = read_for_edit(config)?;
     if text.contains(BLOCK_START) {
-        // Blocks written before binds.conf existed are brought up to date,
-        // keeping the selected theme.
-        if !text.contains(&paths::binds_conf().display().to_string()) {
+        // Blocks written before binds.conf existed (or broken by hand) are
+        // brought up to date, keeping the selected theme.
+        let complete = text[text.find(BLOCK_START).unwrap_or(0)..].contains(BLOCK_END);
+        if !complete || !text.contains(&esc_path(&paths::binds_conf())) {
             let theme = active_theme(&text);
-            std::fs::write(config, with_managed_block(&text, theme.as_deref()))?;
+            write_for_edit(config, &with_managed_block(&text, theme.as_deref()))?;
         }
         return Ok(());
     }
-    std::fs::write(config, with_managed_block(&text, None))
+    write_for_edit(config, &with_managed_block(&text, None))
 }
 
 /// Selects a theme (None = no theme) in the user's config.
 pub fn apply(config: &Path, theme: Option<&Path>) -> std::io::Result<()> {
-    let text = std::fs::read_to_string(config).unwrap_or_default();
-    std::fs::write(config, with_managed_block(&text, theme))
+    let text = read_for_edit(config)?;
+    write_for_edit(config, &with_managed_block(&text, theme))
 }
 
 #[cfg(test)]
@@ -218,6 +258,45 @@ mod tests {
         let c = with_managed_block(&b, None);
         assert_eq!(active_theme(&c), None);
         assert!(c.starts_with(cfg));
+    }
+
+    #[test]
+    fn broken_markers_never_lose_user_lines() {
+        let block = with_managed_block("", None);
+        // End marker missing (edited by hand), user lines after it.
+        let start_only = format!("a = 1\n{BLOCK_START}\nsource = old.conf\nmine = 2\n");
+        let out = with_managed_block(&start_only, None);
+        assert!(out.contains("a = 1") && out.contains("mine = 2") && out.contains("source = old.conf"), "{out}");
+        assert_eq!(out.matches(BLOCK_START).count(), 1);
+        assert!(out.ends_with(&block));
+        // Saving again changes nothing but the block.
+        assert_eq!(with_managed_block(&out, None), out);
+        // End marker before the start marker.
+        let swapped = format!("x = 1\n{BLOCK_END}\ny = 2\n{BLOCK_START}\nz = 3\n");
+        let out = with_managed_block(&swapped, None);
+        for l in ["x = 1", "y = 2", "z = 3"] {
+            assert_eq!(out.matches(l).count(), 1, "{l} in {out}");
+        }
+        assert_eq!(out.matches(BLOCK_START).count(), 1);
+    }
+
+    #[test]
+    fn unreadable_configs_are_never_rewritten() {
+        let dir = std::env::temp_dir().join(format!("hyprwin-edit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Windows-1252 text (an accented comment saved by an old editor).
+        let cfg = dir.join("hyprland.conf");
+        let ansi = b"# caf\xe9\ngeneral {\n    gaps_in = 3\n}\n".to_vec();
+        std::fs::write(&cfg, &ansi).unwrap();
+        assert!(apply(&cfg, None).is_err());
+        assert_eq!(std::fs::read(&cfg).unwrap(), ansi, "the user's config was rewritten");
+        // A UTF-8 config is edited, and a backup of the original is kept.
+        std::fs::write(&cfg, "general {\n    gaps_in = 3\n}\n").unwrap();
+        apply(&cfg, None).unwrap();
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(text.starts_with("general {") && text.contains(BLOCK_START));
+        assert_eq!(std::fs::read_to_string(cfg.with_extension("conf.before-hyprwin")).unwrap(), "general {\n    gaps_in = 3\n}\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
