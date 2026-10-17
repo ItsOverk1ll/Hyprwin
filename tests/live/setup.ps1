@@ -36,7 +36,9 @@ try {
     Check 'Settings shortcut' (Test-Path "$sandbox\startmenu\hyprwin-test Settings.lnk")
     if (Test-Path "$sandbox\startmenu\hyprwin-test.lnk") {
         $t = (New-Object -ComObject WScript.Shell).CreateShortcut("$sandbox\startmenu\hyprwin-test.lnk").TargetPath
-        Check 'shortcut points at the installed hyprwin.exe' ($t -eq "$sandbox\bin\hyprwin.exe") $t
+        # Compare as short paths: %TEMP% may be in 8.3 form (C:\Users\RUNNER~1\...) or not.
+        $long = { param($p) $fso = New-Object -ComObject Scripting.FileSystemObject; if (Test-Path $p) { $fso.GetFile($p).ShortPath } else { $p } }
+        Check 'shortcut points at the installed hyprwin.exe' ((& $long $t) -eq (& $long "$sandbox\bin\hyprwin.exe")) $t
     }
     $u = Get-ItemProperty $uninst -ErrorAction SilentlyContinue
     Check 'Installed-apps entry' ($u.DisplayName -eq 'hyprwin' -and $u.UninstallString -match 'hyprwin-settings\.exe" --uninstall') "$($u.UninstallString)"
