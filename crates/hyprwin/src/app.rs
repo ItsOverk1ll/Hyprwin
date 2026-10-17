@@ -12,7 +12,7 @@ use hyprwin_layout::{Dir, Effect, FullscreenMode, Rect, WinId, Wm, WsSel};
 use hyprwin_win32::ledger::{HideMethod, Ledger};
 use hyprwin_win32::{HWND, cloak, dwm, monitor, window};
 use serde_json::json;
-use windows::Win32::Foundation::{LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::POINT;
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -30,6 +30,7 @@ pub const TIMER_MONITORS: usize = 2;
 pub const TIMER_SAVE: usize = 3;
 pub const TIMER_GROUPS: usize = 4;
 pub const TIMER_TASKBAR: usize = 5;
+pub const TIMER_CLOSE: usize = 6;
 
 const VERIFY_DELAY_MS: u32 = 150;
 const FIGHT_LIMIT: u32 = 4;
@@ -80,6 +81,10 @@ pub struct App {
     /// Set while applying corrections that must not animate.
     anim_quiet: bool,
     active_border: crate::border::ActiveBorder,
+    /// Windows being closed by hyprwin: (picture window, frame, when).
+    closing: HashMap<WinId, (HWND, Rect, Instant)>,
+    /// Picture windows whose closing animation is playing.
+    close_snaps: Vec<HWND>,
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
@@ -147,6 +152,8 @@ impl App {
             taskbar_reveal: Default::default(),
             anim_quiet: false,
             active_border: Default::default(),
+            closing: HashMap::new(),
+            close_snaps: Vec::new(),
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
@@ -519,9 +526,7 @@ impl App {
                 Effect::Raise(id) => unsafe {
                     let _ = SetWindowPos(hwnd(id), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
                 },
-                Effect::Close(id) => unsafe {
-                    let _ = PostMessageW(Some(hwnd(id)), WM_CLOSE, WPARAM(0), LPARAM(0));
-                },
+                Effect::Close(id) => self.close_window(id),
                 Effect::Kill(id) => {
                     if let Some(m) = self.meta.get(&id) {
                         warn!("force-killing pid {} ({})", m.pid, m.class);
@@ -903,6 +908,9 @@ impl App {
             return;
         }
         let id = id_of(h);
+        if matches!(ev, EVENT_OBJECT_HIDE | EVENT_OBJECT_DESTROY | EVENT_OBJECT_CLOAKED) && self.closing.contains_key(&id) {
+            self.on_closed(id);
+        }
         let managed = self.wm.windows.contains_key(&id);
         let ours = self.ledger.hidden.contains_key(&(h.0 as isize));
         match ev {
@@ -1429,6 +1437,12 @@ impl App {
     /// Puts every window back the way we found it.
     pub fn restore_everything(&mut self) {
         self.animator.cancel();
+        for (_, (snap, _, _)) in std::mem::take(&mut self.closing) {
+            crate::snapshot::destroy(snap);
+        }
+        for snap in std::mem::take(&mut self.close_snaps) {
+            crate::snapshot::destroy(snap);
+        }
         self.anim_pending.clear();
         self.anim_target.clear();
         let n = self.ledger.restore_all();

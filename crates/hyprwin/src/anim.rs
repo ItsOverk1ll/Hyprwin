@@ -36,6 +36,9 @@ pub struct Item {
     pub to: Frame,
     pub curve: Bezier,
     pub duration: Duration,
+    /// The source is one of hyprwin's own snapshot windows: hide it once the
+    /// overlay shows its thumbnail (closing animations).
+    pub cloak_source: bool,
 }
 
 enum Msg {
@@ -135,6 +138,10 @@ struct Live {
     start: Instant,
     curve: Bezier,
     duration: Duration,
+    cloak_source: bool,
+    drawn: bool,
+    /// A closing window's picture: always drawn above the others.
+    closing: bool,
 }
 
 fn lerp_frame(a: Frame, b: Frame, t: f64) -> Frame {
@@ -180,6 +187,7 @@ fn run(rx: Receiver<Msg>, drawn: Arc<Mutex<HashMap<WinId, Frame>>>, main: HWND, 
                     seq = g;
                     waiting = None;
                     let now = Instant::now();
+                    let mut added_other = false;
                     for it in list {
                         let h = HWND(it.id as *mut _);
                         let current = drawn.lock().ok().and_then(|d| d.get(&it.id).copied());
@@ -192,7 +200,15 @@ fn run(rx: Receiver<Msg>, drawn: Arc<Mutex<HashMap<WinId, Frame>>>, main: HWND, 
                             l.duration = it.duration;
                         } else if let Ok(thumb) = overlay.add(h, crop(h)) {
                             let _ = overlay.set_cropped(thumb, from.rect, crop(h), (from.opacity * 255.0) as u8);
-                            items.push(Live { id: it.id, thumb, from, to: it.to, start: now, curve: it.curve, duration: it.duration });
+                            items.push(Live { id: it.id, thumb, from, to: it.to, start: now, curve: it.curve, duration: it.duration, cloak_source: it.cloak_source, drawn: false, closing: it.cloak_source });
+                            added_other |= !it.cloak_source;
+                        }
+                    }
+                    // A closing window stays on top while it pops out, as in
+                    // Hyprland (the neighbours growing into its space go under it).
+                    if added_other {
+                        for l in items.iter().filter(|l| l.closing) {
+                            let _ = overlay.raise(l.thumb, HWND(l.id as *mut _));
                         }
                     }
                 }
@@ -211,13 +227,20 @@ fn run(rx: Receiver<Msg>, drawn: Arc<Mutex<HashMap<WinId, Frame>>>, main: HWND, 
             let now = Instant::now();
             let mut all_done = true;
             let mut out = Vec::with_capacity(items.len());
-            for l in &items {
+            for l in items.iter_mut() {
+                // The overlay has shown this thumbnail for a frame: the
+                // snapshot window under it can go.
+                if l.cloak_source && l.drawn {
+                    crate::snapshot::cloak_own(HWND(l.id as *mut _));
+                    l.cloak_source = false;
+                }
                 let p = if l.duration.is_zero() { 1.0 } else { (now - l.start).as_secs_f64() / l.duration.as_secs_f64() };
                 let done = p >= 1.0;
                 all_done &= done;
                 let f = if done { l.to } else { lerp_frame(l.from, l.to, l.curve.ease(p.clamp(0.0, 1.0))) };
                 let h = HWND(l.id as *mut _);
                 let _ = overlay.set_cropped(l.thumb, f.rect, crop(h), (f.opacity * 255.0).round() as u8);
+                l.drawn = true;
                 out.push((l.id, f));
             }
             if let Ok(mut d) = drawn.lock() {

@@ -136,6 +136,26 @@ try {
     Check 'ws 1 windows visible, nothing stuck' (Settled @($ha, $hb))
     Check 'still on ws 1' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 1)
 
+    Write-Host "`n== closing with killactive (windowsOut from a snapshot)"
+    $pc = Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '60,200,60', 500, 500, 500, 400, 'hyprwin-anim-c' -PassThru
+    $procs += $pc
+    Start-Sleep -Milliseconds 1500
+    Ctl dispatch focuswindow title:hyprwin-anim-c | Out-Null; Start-Sleep -Milliseconds 700
+    Ctl dispatch killactive | Out-Null
+    $sawSnap = $false; $sawOverlay = $false; $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMilliseconds -lt 600) {
+        if ([A6]::FindWindow('hyprwin.snapshot', [NullString]::Value) -ne [IntPtr]::Zero) { $sawSnap = $true }
+        if (Overlay) { $sawOverlay = $true }
+        Start-Sleep -Milliseconds 5
+    }
+    Start-Sleep -Milliseconds 600
+    Check 'a snapshot stood in for the closing window' $sawSnap
+    Check 'it animated through the overlay' $sawOverlay
+    Check 'the window really closed' ($pc.HasExited -or [A6]::FindWindow([NullString]::Value, 'hyprwin-anim-c') -eq [IntPtr]::Zero)
+    Check 'no snapshot or overlay left behind' ([A6]::FindWindow('hyprwin.snapshot', [NullString]::Value) -eq [IntPtr]::Zero -and -not (Overlay))
+    Check 'remaining windows settled and uncloaked' (Settled @($ha, $hb))
+    $bad = Matches-Model; Check 'remaining windows re-tiled correctly' ($bad.Count -eq 0) ($bad -join '; ')
+
     Write-Host "`n== crash mid-animation: the guard restores cloaked windows"
     Ctl dispatch layoutmsg swapsplit | Out-Null
     Start-Sleep -Milliseconds 60

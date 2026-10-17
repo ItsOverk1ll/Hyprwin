@@ -26,6 +26,12 @@ struct Form {
     gaps_in: i32,
     gaps_out: i32,
     borders: bool,
+    /// Thickness when borders are on (logical px).
+    border_size: i32,
+    /// The theme's focused border is a gradient (not editable here).
+    gradient: bool,
+    /// 0 = off, 1 = fast, 2 = normal, 3 = slow
+    anim: u8,
     active: Color32,
     inactive: Color32,
     /// 0 = square, 1 = small, 2 = round
@@ -51,6 +57,17 @@ impl Form {
             gaps_in: c.wm.gaps_in.top,
             gaps_out: c.wm.gaps_out.top,
             borders: c.border_size > 0,
+            border_size: if c.border_size > 0 { c.border_size } else { 2 },
+            gradient: c.active_gradient.colors.len() > 1,
+            anim: if !c.animations_enabled {
+                0
+            } else if c.animation_speed >= 1.3 {
+                1
+            } else if c.animation_speed <= 0.8 {
+                3
+            } else {
+                2
+            },
             active: to_color32(c.col_active.0),
             inactive: to_color32(c.col_inactive.0),
             corners: match c.rounding {
@@ -76,8 +93,14 @@ impl Form {
         if self.gaps_out != base.gaps_out {
             v.push(("general:gaps_out", self.gaps_out.to_string()));
         }
-        if self.borders != base.borders {
-            v.push(("general:border_size", if self.borders { "2" } else { "0" }.to_string()));
+        if self.borders != base.borders || (self.borders && self.border_size != base.border_size) {
+            v.push(("general:border_size", if self.borders { self.border_size.to_string() } else { "0".into() }));
+        }
+        if self.anim != base.anim {
+            v.push(("animations:enabled", (self.anim != 0).to_string()));
+            if self.anim != 0 {
+                v.push(("hyprwin:animation_speed", ["1", "1.6", "1", "0.6"][self.anim as usize].to_string()));
+            }
         }
         if self.active != base.active {
             v.push(("general:col.active_border", to_hypr(self.active)));
@@ -335,6 +358,10 @@ impl SettingsApp {
         section(ui, "Look", |ui| {
             ui.checkbox(&mut self.form.borders, "Coloured window borders");
             ui.add_enabled_ui(self.form.borders, |ui| {
+                ui.add(egui::Slider::new(&mut self.form.border_size, 1..=8).text("thickness (px)"));
+                if self.form.gradient && self.form.active == self.base.active {
+                    ui.label(RichText::new("Your theme gives the focused window a gradient border. Picking a colour below replaces it.").weak().small());
+                }
                 ui.horizontal(|ui| {
                     ui.label("Focused window");
                     ui.color_edit_button_srgba(&mut self.form.active);
@@ -349,6 +376,16 @@ impl SettingsApp {
                 ui.selectable_value(&mut self.form.corners, 1, "Slightly round");
                 ui.selectable_value(&mut self.form.corners, 2, "Round");
             });
+        });
+
+        section(ui, "Animations", |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.form.anim, 0, "Off");
+                ui.selectable_value(&mut self.form.anim, 1, "Fast");
+                ui.selectable_value(&mut self.form.anim, 2, "Normal");
+                ui.selectable_value(&mut self.form.anim, 3, "Slow");
+            });
+            ui.label(RichText::new("Windows glide when they move, pop in when they open, and fade between workspaces.").weak());
         });
 
         section(ui, "Behaviour", |ui| {

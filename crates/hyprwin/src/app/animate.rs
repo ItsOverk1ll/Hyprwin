@@ -37,6 +37,10 @@ pub struct Plan {
     pub defer_show: HashSet<WinId>,
 }
 
+fn frame_of(r: Rect) -> Frame {
+    frame(r)
+}
+
 fn frame(r: Rect) -> Frame {
     Frame { rect: r, opacity: 1.0 }
 }
@@ -46,7 +50,7 @@ fn near(a: Rect, b: Rect) -> bool {
 }
 
 fn item(id: WinId, from: Frame, to: Frame, a: &ResolvedAnim) -> Item {
-    Item { id, from: Some(from), to, curve: a.curve, duration: Duration::from_secs_f64(a.duration_ms / 1000.0) }
+    Item { id, from: Some(from), to, curve: a.curve, duration: Duration::from_secs_f64(a.duration_ms / 1000.0), cloak_source: false }
 }
 
 impl App {
@@ -233,6 +237,10 @@ impl App {
         }
         let _ = self.ledger.save();
         self.animator.release(seq);
+        // Closing pictures have played out (their last frame is invisible).
+        for snap in std::mem::take(&mut self.close_snaps) {
+            crate::snapshot::destroy(snap);
+        }
         if let Some(f) = self.anim_focus.take() {
             if self.wm.focus == Some(f) && self.wm.desired_rect(f).is_some() {
                 self.apply(vec![Effect::Focus(f)]);
@@ -252,6 +260,80 @@ impl App {
             self.on_anim_done(seq);
         }
         self.animator.cancel();
+    }
+
+    // ------------------------------------------------------------------ closing
+
+    /// Closes a window hyprwin was asked to close (`killactive`,
+    /// `closewindow`), first putting a picture of it in its place so its
+    /// `windowsOut` animation can play once it is gone.
+    pub fn close_window(&mut self, id: WinId) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, SetTimer, WM_CLOSE};
+        let h = hwnd(id);
+        let animate = !self.anim_quiet
+            && !self.paused
+            && self.cfg.anim("windowsOut").is_some()
+            && self.wm.desired_rect(id).is_some()
+            && !self.hidden_for_workspace(id)
+            && window::is_visible(h)
+            && !unsafe { IsIconic(h).as_bool() };
+        if animate {
+            let fullscreen = self.wm.fullscreen_of(id).is_some();
+            let radius = if fullscreen { 0 } else { crate::border::corner_radius(self.cfg.rounding, crate::border::scale_of(h)) };
+            if let Some(pic) = crate::snapshot::capture(h, radius) {
+                if let Some(snap) = crate::snapshot::show(&pic, h) {
+                    if let Some((old, _, _)) = self.closing.insert(id, (snap, pic.frame, Instant::now())) {
+                        crate::snapshot::destroy(old);
+                    }
+                    unsafe {
+                        SetTimer(Some(self.main), super::TIMER_CLOSE, 400, None);
+                    }
+                }
+            }
+        }
+        unsafe {
+            let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+
+    /// The window being closed disappeared: its picture plays `windowsOut`.
+    pub fn on_closed(&mut self, id: WinId) {
+        let Some((snap, frame, _)) = self.closing.remove(&id) else { return };
+        let Some(a) = self.cfg.anim("windowsOut") else {
+            crate::snapshot::destroy(snap);
+            return;
+        };
+        let (cx, cy) = frame.center();
+        let mon = self
+            .wm
+            .monitors
+            .iter()
+            .map(|m| m.spec.rect)
+            .find(|m| cx >= m.x as f64 && cx < m.right() as f64 && cy >= m.y as f64 && cy < m.bottom() as f64)
+            .unwrap_or(frame);
+        let style = a.style.as_deref().and_then(WindowStyle::parse).unwrap_or(WindowStyle::Popin { start_percent: 87.0 });
+        let to = window_frame(style, frame, mon, 1.0, true);
+        let mut it = item(snap.0 as isize as WinId, frame_of(frame), to, &a);
+        it.cloak_source = true;
+        self.close_snaps.push(snap);
+        self.start_animations(Plan { items: vec![it], ..Default::default() });
+    }
+
+    /// Windows that did not close after all (an app asking to save changes)
+    /// get their picture removed.
+    pub fn close_timeout(&mut self) {
+        let stale: Vec<WinId> = self.closing.iter().filter(|(_, (_, _, t))| t.elapsed() >= Duration::from_millis(350)).map(|(id, _)| *id).collect();
+        for id in stale {
+            if let Some((snap, _, _)) = self.closing.remove(&id) {
+                crate::snapshot::destroy(snap);
+            }
+        }
+        if self.closing.is_empty() {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(self.main), super::TIMER_CLOSE);
+            }
+        }
     }
 
     pub fn is_animating(&self, id: WinId) -> bool {

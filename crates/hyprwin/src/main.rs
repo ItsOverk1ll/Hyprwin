@@ -12,6 +12,7 @@ mod log;
 mod anim;
 mod border;
 mod shell;
+mod snapshot;
 mod taskbar;
 mod tray;
 
@@ -147,6 +148,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             app::TIMER_VERIFY => with_app(msg, w, l, |a| a.verify()),
             app::TIMER_SAVE => with_app(msg, w, l, |a| a.save_state()),
             app::TIMER_TASKBAR => with_app(msg, w, l, |a| a.taskbar_tick()),
+            app::TIMER_CLOSE => with_app(msg, w, l, |a| a.close_timeout()),
             app::TIMER_GROUPS => {
                 unsafe {
                     let _ = KillTimer(Some(h), app::TIMER_GROUPS);

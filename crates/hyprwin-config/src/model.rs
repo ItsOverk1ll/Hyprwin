@@ -133,6 +133,8 @@ pub struct Config {
     /// `hyprwin:force_tile`: only real dialogs float automatically; windows
     /// that are always-on-top, fixed-size or borderless popups tile too.
     pub force_tile: bool,
+    /// hyprwin extension: multiplies every animation's speed (2 = twice as fast).
+    pub animation_speed: f64,
     pub warnings: Vec<String>,
     pub files: Vec<std::path::PathBuf>,
 }
@@ -165,6 +167,7 @@ impl Default for Config {
             reserved: HashMap::new(),
             hide_taskbar: false,
             force_tile: false,
+            animation_speed: 1.0,
             warnings: Vec::new(),
             files: Vec::new(),
         }
@@ -357,6 +360,9 @@ impl Config {
             "layerrule" | "permission" | "plugin" | "gesture" => ignored.push(e.key.clone()),
             "hyprwin:hide_taskbar" => self.hide_taskbar = boolean(v)?,
             "hyprwin:force_tile" => self.force_tile = boolean(v)?,
+            "hyprwin:animation_speed" => {
+                self.animation_speed = v.trim().parse::<f64>().map_err(|_| format!("bad number '{v}'"))?.clamp(0.1, 10.0);
+            }
             k if IGNORED_PREFIXES.iter().any(|p| k.starts_with(p)) => ignored.push(k.to_string()),
             k => return Err(format!("unknown option '{k}'")),
         }
@@ -504,7 +510,7 @@ impl Config {
             None
         });
         Some(ResolvedAnim {
-            duration_ms: hyprwin_anim::speed_to_ms(entry.speed_ds),
+            duration_ms: hyprwin_anim::speed_to_ms(entry.speed_ds) / self.animation_speed,
             curve: self.beziers.get(&entry.curve).copied().unwrap_or(Bezier::HYPR_DEFAULT),
             style,
         })
@@ -640,5 +646,18 @@ monitor=,preferred,auto,auto
         assert_eq!(c.active_gradient.colors, vec![Color(0xEE33CCFF), Color(0xEE00FF99)]);
         assert_eq!(c.active_gradient.angle_deg, 45.0);
         assert_eq!(c.col_active, Color(0xEE33CCFF));
+    }
+
+    #[test]
+    fn animation_speed_scales_durations() {
+        let c = Config::load_str("animations {
+ animation = windows, 1, 4, default
+}
+hyprwin {
+ animation_speed = 2
+}
+");
+        assert_eq!(c.anim("windowsMove").unwrap().duration_ms, 200.0);
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     }
 }

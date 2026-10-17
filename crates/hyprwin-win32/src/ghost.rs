@@ -192,6 +192,16 @@ impl Overlay {
         Ok(self.thumbs.len() - 1)
     }
 
+    /// Moves thumbnail `idx` above all others (DWM stacks thumbnails in
+    /// registration order, so it is registered again). Its properties must be
+    /// set again before the next frame.
+    pub fn raise(&mut self, idx: usize, source: HWND) -> windows::core::Result<()> {
+        let crop = self.thumbs[idx].1;
+        let fresh = Thumbnail::register(self.hwnd, source)?;
+        self.thumbs[idx] = (fresh, crop);
+        Ok(())
+    }
+
     /// Like [`set`](Self::set) with a new source crop (window-relative).
     pub fn set_cropped(&self, idx: usize, screen: Rect, crop: Option<Rect>, opacity: u8) -> windows::core::Result<()> {
         let (t, _) = &self.thumbs[idx];

@@ -180,6 +180,10 @@ pub fn classify(h: HWND, m: &Meta, own_pid: u32) -> Verdict {
         return Verdict::Ignore("untitled popup");
     }
     // From here on we manage it; decide tile vs float.
+    // hyprwin's own installer is a dialog, whatever "tile everything" says.
+    if m.title == "hyprwin Setup" && m.exe.to_lowercase().contains("hyprwin") {
+        return Verdict::Manage { float: true, reason: "dialog" };
+    }
     if m.owner != 0 {
         return Verdict::Manage { float: true, reason: "owned window (dialog/palette)" };
     }

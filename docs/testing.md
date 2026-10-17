@@ -3,7 +3,7 @@
 ## Automated
 
 ```powershell
-cargo test --workspace                                                # 109 unit tests (layout, config, animation, ledger)
+cargo test --workspace                                                # 112 unit tests (layout, config, animation, ledger)
 cargo build --release
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\phase1.ps1                   # 36 live checks
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\overflow.ps1                 # min-size overflow to the next workspace
@@ -13,6 +13,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\ux.ps1           
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\anim.ps1                     # animations: open, move, focus/borders kept, retarget, workspace switch, crash mid-animation, disabled
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\taskbar.ps1                  # hide_taskbar: work area, edge reveal, Start, toggle, pause, crash restore (hides the real taskbar ~15 s)
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\border.ps1                   # drawn gradient border: colours, width, follows focus/swaps, hidden in fullscreen/empty ws/pause
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\leak.ps1                     # 40 swaps, 10 workspace trips, 6 animated closes: handles, GDI/USER objects, memory stable
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\setup.ps1                    # packaged zip: install, update, uninstall (sandboxed; run scripts\package.ps1 first)
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update
