@@ -52,6 +52,7 @@ and `restart.ps1`.
 | The drawn border is moved, not re-rendered pixel by pixel, when only its position changes | Smoother dragging with thick or gradient borders |
 | Taskbar reveal strips are cached instead of enumerating monitors on every mouse move | Less work per mouse move while the taskbar is hidden |
 | `focuswindow class:…` compiles its regex once, not once per window | Faster selectors |
+| Focus changes skip walking every top-level window when no floating window is on screen | Cheaper focus changes in the common all-tiled case |
 
 ## Tests added
 
