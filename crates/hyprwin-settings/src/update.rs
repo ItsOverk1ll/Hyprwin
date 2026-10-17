@@ -37,7 +37,10 @@ fn check_now() -> Outcome {
     };
     let current = env!("CARGO_PKG_VERSION");
     if is_newer(tag, current) {
-        Outcome::Available { version: tag.trim_start_matches('v').to_string(), url: v["html_url"].as_str().unwrap_or(RELEASES_PAGE).to_string() }
+        // The link is opened with explorer.exe, which also runs local files:
+        // only ever this project's release pages.
+        let url = v["html_url"].as_str().filter(|u| u.starts_with(RELEASES_PAGE) && !u.contains(['"', ' ', '\n'])).unwrap_or(RELEASES_PAGE);
+        Outcome::Available { version: tag.trim_start_matches('v').to_string(), url: url.to_string() }
     } else {
         Outcome::UpToDate(current.to_string())
     }
@@ -53,7 +56,9 @@ pub fn start() -> Receiver<Outcome> {
 }
 
 pub fn open(url: &str) {
-    let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+    if url.starts_with(RELEASES_PAGE) {
+        let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+    }
 }
 
 #[cfg(test)]
