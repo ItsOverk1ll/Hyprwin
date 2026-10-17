@@ -714,6 +714,14 @@ impl App {
             return;
         }
         let mon = self.wm.workspaces.get(&w.ws).map(|x| x.monitor);
+        // Usually there is no floating window on screen at all: skip walking
+        // every top-level window on the desktop then.
+        let any_float = self.wm.windows.values().any(|f| {
+            f.floating && !f.minimized && self.wm.workspaces.get(&f.ws).map(|x| x.monitor) == mon && self.wm.desired_rect(f.id).is_some()
+        });
+        if !any_float {
+            return;
+        }
         // Never use an always-on-top window as the anchor: Windows makes a
         // window placed directly below a topmost one topmost too, which once
         // turned tiled apps (Discord, Spotify) into always-on-top windows.
