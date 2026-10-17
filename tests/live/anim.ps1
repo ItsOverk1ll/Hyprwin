@@ -136,6 +136,26 @@ try {
     Check 'ws 1 windows visible, nothing stuck' (Settled @($ha, $hb))
     Check 'still on ws 1' (((Ctl -j activeworkspace) | ConvertFrom-Json).id -eq 1)
 
+    Write-Host "`n== scratchpad (special workspace) slides in and out"
+    Ctl dispatch focuswindow title:hyprwin-anim-b | Out-Null; Start-Sleep -Milliseconds 400
+    Ctl dispatch movetoworkspacesilent special:magic | Out-Null; Start-Sleep -Milliseconds 900
+    Check 'window sent to the scratchpad is hidden' ((Cloaked $hb) -ne 0)
+    Ctl dispatch togglespecialworkspace magic | Out-Null
+    $seen = Watch 500 @()
+    Start-Sleep -Milliseconds 300
+    Check 'opening the scratchpad animated' $seen.overlay
+    Check 'scratchpad window visible' ((Cloaked $hb) -eq 0)
+    Ctl dispatch togglespecialworkspace magic | Out-Null
+    $seen = Watch 500 @()
+    Start-Sleep -Milliseconds 300
+    Check 'closing the scratchpad animated' $seen.overlay
+    Check 'scratchpad window hidden again' ((Cloaked $hb) -ne 0)
+    Ctl dispatch togglespecialworkspace magic | Out-Null; Start-Sleep -Milliseconds 600
+    Ctl dispatch focuswindow title:hyprwin-anim-b | Out-Null
+    Ctl dispatch movetoworkspace 1 | Out-Null; Start-Sleep -Milliseconds 1200
+    if (((Ctl -j monitors | ConvertFrom-Json) | Where-Object { $_.focused }).specialWorkspace.name) { Ctl dispatch togglespecialworkspace magic | Out-Null; Start-Sleep -Milliseconds 700 }
+    Check 'window back on ws 1, everything settled' ((Settled @($ha, $hb)) -and (((Ctl -j clients | ConvertFrom-Json) | Where-Object { $_.title -eq 'hyprwin-anim-b' }).workspace.id -eq 1))
+
     Write-Host "`n== closing with killactive (windowsOut from a snapshot)"
     $pc = Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '60,200,60', 500, 500, 500, 400, 'hyprwin-anim-c' -PassThru
     $procs += $pc

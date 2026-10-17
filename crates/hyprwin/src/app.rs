@@ -75,6 +75,7 @@ pub struct App {
     /// Last target each window was animated to (re-sending it is a correction).
     anim_target: HashMap<WinId, Rect>,
     anim_active_ws: HashMap<hyprwin_layout::MonId, hyprwin_layout::WsId>,
+    anim_special: HashMap<hyprwin_layout::MonId, Option<hyprwin_layout::WsId>>,
     anim_focus: Option<WinId>,
     anim_started: Option<Instant>,
     taskbar_reveal: crate::taskbar::Reveal,
@@ -147,6 +148,7 @@ impl App {
             anim_pending: HashMap::new(),
             anim_target: HashMap::new(),
             anim_active_ws: HashMap::new(),
+            anim_special: HashMap::new(),
             anim_focus: None,
             anim_started: None,
             taskbar_reveal: Default::default(),

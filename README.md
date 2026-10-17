@@ -12,7 +12,7 @@ It's a small native Rust daemon that runs on top of Explorer. It doesn't install
 2. Double-click **hyprwin-setup.exe** and press **Install**.
 3. hyprwin starts and shows a notification. Its icon sits in the system tray.
 
-Uninstall from **Windows Settings › Apps › Installed apps › hyprwin**. Your config, themes and groups are kept unless you tick the box to delete them.
+To update, run the newer `hyprwin-setup.exe` (Settings › About › Check for updates tells you when there is one). Uninstall from **Windows Settings › Apps › Installed apps › hyprwin**. Your config, themes and groups are kept unless you tick the box to delete them.
 
 **Emergency exit: Ctrl + Alt + Shift + Win + Esc.** This restores every window and the taskbar, then quits. It always works and can't be unbound. If hyprwin is killed or crashes, `hyprwin-guard` puts everything back.
 

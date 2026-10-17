@@ -156,6 +156,8 @@ pub struct SettingsApp {
     binds_loaded: bool,
     start_with_windows: bool,
     toast: Option<(String, Instant, bool)>,
+    update_rx: Option<std::sync::mpsc::Receiver<crate::update::Outcome>>,
+    update: Option<crate::update::Outcome>,
 }
 
 fn config_path() -> PathBuf {
@@ -222,6 +224,8 @@ impl SettingsApp {
             binds_loaded: false,
             start_with_windows: starts_with_windows(),
             toast: None,
+            update_rx: None,
+            update: None,
         };
         app.style(&cc.egui_ctx);
         app
@@ -651,6 +655,41 @@ impl SettingsApp {
         ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
         ui.label("Hyprland-style tiling for Windows 11.");
         ui.add_space(10.0);
+        section(ui, "Updates", |ui| {
+            if let Some(rx) = &self.update_rx {
+                if let Ok(o) = rx.try_recv() {
+                    self.update = Some(o);
+                    self.update_rx = None;
+                }
+            }
+            use crate::update::Outcome;
+            ui.horizontal(|ui| {
+                let checking = self.update_rx.is_some();
+                if ui.add_enabled(!checking, egui::Button::new(if checking { "Checking…" } else { "Check for updates" })).clicked() {
+                    self.update = None;
+                    self.update_rx = Some(crate::update::start());
+                }
+                match &self.update {
+                    Some(Outcome::UpToDate(v)) => {
+                        ui.label(RichText::new(format!("You have the latest version ({v}).")).color(Color32::from_rgb(120, 220, 150)));
+                    }
+                    Some(Outcome::Available { version, url }) => {
+                        ui.label(RichText::new(format!("hyprwin {version} is available.")).strong());
+                        if ui.button("Open download page").clicked() {
+                            crate::update::open(url);
+                        }
+                    }
+                    Some(Outcome::Failed(why)) => {
+                        ui.label(RichText::new(format!("Couldn't check: {why}.")).weak());
+                        if ui.button("Open releases page").clicked() {
+                            crate::update::open(crate::update::RELEASES_PAGE);
+                        }
+                    }
+                    None => {}
+                }
+            });
+            ui.label(RichText::new("To update, download the new zip and run hyprwin-setup.exe; your settings are kept.").weak().small());
+        });
         section(ui, "If something goes wrong", |ui| {
             ui.label(RichText::new("Ctrl + Alt + Shift + Win + Esc").monospace().strong());
             ui.label("Restores every window and quits hyprwin immediately. Always works.");

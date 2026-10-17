@@ -9,6 +9,7 @@ mod daemon;
 mod setup;
 mod setup_ui;
 mod ui;
+mod update;
 
 use eframe::egui;
 

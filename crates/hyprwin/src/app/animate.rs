@@ -89,6 +89,8 @@ impl App {
     pub fn plan_animations(&mut self, fx: &[Effect]) -> Plan {
         let now_active = self.active_by_monitor();
         let before = std::mem::replace(&mut self.anim_active_ws, now_active.clone());
+        let now_special: HashMap<MonId, Option<WsId>> = self.wm.monitors.iter().enumerate().map(|(i, m)| (i, m.special)).collect();
+        let before_special = std::mem::replace(&mut self.anim_special, now_special.clone());
         let mut plan = Plan::default();
         if self.anim_quiet {
             // Still remember the targets, so the next real change animates
@@ -114,6 +116,11 @@ impl App {
         let open_a = self.cfg.anim("windowsIn");
         let in_a = self.cfg.anim("workspacesIn");
         let out_a = self.cfg.anim("workspacesOut");
+        let sp_in_a = self.cfg.anim("specialWorkspaceIn");
+        let sp_out_a = self.cfg.anim("specialWorkspaceOut");
+        // The scratchpad (special workspace) on monitor `m` opened / closed.
+        let special_opened = |m: MonId, ws: WsId| now_special.get(&m) == Some(&Some(ws)) && before_special.get(&m) != Some(&Some(ws));
+        let special_closed = |m: MonId, ws: WsId| before_special.get(&m) == Some(&Some(ws)) && now_special.get(&m) != Some(&Some(ws));
         let mut to_cloak: Vec<WinId> = Vec::new();
 
         for e in fx {
@@ -154,33 +161,43 @@ impl App {
                     }
                 }
                 Effect::Hide(id) => {
-                    let Some(a) = out_a.as_ref() else { continue };
                     let Some((m, ws)) = ws_mon(self, id) else { continue };
-                    let Some(&(old, new)) = switched.get(&m) else { continue };
-                    if ws != old || self.hidden_for_workspace(id) || self.wm.windows.get(&id).is_none_or(|w| w.minimized) {
+                    // A regular switch away from `ws`, or the scratchpad closing.
+                    let (a, forward) = match switched.get(&m) {
+                        Some(&(old, new)) if ws == old => (out_a.as_ref(), new > old),
+                        _ if special_closed(m, ws) => (sp_out_a.as_ref(), false),
+                        _ => continue,
+                    };
+                    let Some(a) = a else { continue };
+                    if self.hidden_for_workspace(id) || self.wm.windows.get(&id).is_none_or(|w| w.minimized) {
                         continue;
                     }
                     let Some(from) = self.shown_frame(id) else { continue };
                     let mon = self.wm.monitors[m].spec.rect;
                     let style = a.style.as_deref().and_then(WorkspaceStyle::parse).unwrap_or(WorkspaceStyle::Slide);
                     let rest = self.anim_target.get(&id).copied().unwrap_or(from.rect);
-                    let to = workspace_frame(style, rest, mon, 1.0, false, new > old);
+                    let to = workspace_frame(style, rest, mon, 1.0, false, forward);
                     plan.items.push(item(id, from, to, a));
                     // From now on it is a workspace hide; the end of the
                     // animation must not uncloak it.
                     self.anim_pending.remove(&id);
                 }
                 Effect::Show(id) => {
-                    let Some(a) = in_a.as_ref() else { continue };
                     let Some((m, ws)) = ws_mon(self, id) else { continue };
-                    let Some(&(old, new)) = switched.get(&m) else { continue };
+                    // A regular switch to `ws`, or the scratchpad opening.
+                    let (a, forward) = match switched.get(&m) {
+                        Some(&(old, new)) if ws == new => (in_a.as_ref(), new > old),
+                        _ if special_opened(m, ws) => (sp_in_a.as_ref(), true),
+                        _ => continue,
+                    };
+                    let Some(a) = a else { continue };
                     let Some(rest) = self.wm.desired_rect(id) else { continue };
-                    if ws != new || !self.hidden_for_workspace(id) {
+                    if !self.hidden_for_workspace(id) {
                         continue;
                     }
                     let mon = self.wm.monitors[m].spec.rect;
                     let style = a.style.as_deref().and_then(WorkspaceStyle::parse).unwrap_or(WorkspaceStyle::Slide);
-                    let from = workspace_frame(style, rest, mon, 0.0, true, new > old);
+                    let from = workspace_frame(style, rest, mon, 0.0, true, forward);
                     plan.items.push(item(id, from, frame(rest), a));
                     self.anim_target.insert(id, rest);
                     plan.defer_show.insert(id);

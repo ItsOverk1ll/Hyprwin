@@ -1,7 +1,7 @@
-test windows: 4657398, 7735694, 7212408
+test windows: 12651410, 12125768, 9964588
 
 == startup
-  [PASS] daemon answers IPC hyprwin 0.1.0 (Hyprland-compatible IPC)
+  [PASS] daemon answers IPC hyprwin 0.2.0 (Hyprland-compatible IPC)
   [PASS] all 3 test windows managed count=3
   [PASS] nothing else managed 
 
@@ -9,9 +9,9 @@ test windows: 4657398, 7735694, 7212408
     window 0 frame: 30,30,1882,2028   desired: 30,30,1882,2028
     window 1 frame: 1928,30,1882,1006   desired: 1928,30,1882,1006
     window 2 frame: 1928,1052,1882,1006   desired: 1928,1052,1882,1006
-  [PASS] frame of hyprwin-test-0 is pixel-exact actual=30,30,1882,2028 desired=30,30,1882,2028
   [PASS] frame of hyprwin-test-2 is pixel-exact actual=1928,1052,1882,1006 desired=1928,1052,1882,1006
   [PASS] frame of hyprwin-test-1 is pixel-exact actual=1928,30,1882,1006 desired=1928,30,1882,1006
+  [PASS] frame of hyprwin-test-0 is pixel-exact actual=30,30,1882,2028 desired=30,30,1882,2028
   [PASS] outer gap on the left = gaps_out minX=30 expected=30
   [PASS] gap between tiles = 2 x gaps_in gap=16 expected=16
 
@@ -44,8 +44,8 @@ test windows: 4657398, 7735694, 7212408
 
 == performance
   [PASS] idle CPU ~0% (10 s sample) 0.000% of one core
-  [PASS] RAM under 30 MB working set=22.8 MB private=3.4 MB
-    20 dispatches round-trip via hyprwinctl: 10.6 ms each (includes process start)
+  [PASS] RAM under 30 MB working set=23.1 MB private=3.8 MB
+    20 dispatches round-trip via hyprwinctl: 10.3 ms each (includes process start)
 
 == keyboard binds (injected keystrokes)
   [PASS] Super+V toggles floating before=False after=True
