@@ -1022,7 +1022,14 @@ impl App {
                 if !managed && !ours {
                     self.try_manage(h);
                 } else if managed && ours {
-                    self.keep_hidden(id);
+                    if unsafe { GetForegroundWindow() } == h {
+                        // Activated (a taskbar click): the foreground handler
+                        // switches to its workspace, or the next verify pass
+                        // hides it again. Re-cloaking now would fight that.
+                        self.schedule_verify();
+                    } else {
+                        self.keep_hidden(id);
+                    }
                 }
             }
             EVENT_OBJECT_DESTROY => {
