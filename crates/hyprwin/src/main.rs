@@ -40,7 +40,6 @@ use windows::core::PCWSTR;
 const WM_APP_EVENTS: u32 = WM_APP + 10;
 const WM_APP_IPC: u32 = WM_APP + 11;
 const WM_APP_RELOAD: u32 = WM_APP + 12;
-const WM_APP_REPOST: u32 = WM_APP + 13;
 
 type IpcJob = (String, Sender<String>);
 
@@ -48,6 +47,7 @@ thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
     static QUEUE: RefCell<VecDeque<(u32, isize)>> = const { RefCell::new(VecDeque::new()) };
     static QUEUE_POSTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static DEFERRED: RefCell<Vec<(u32, usize, isize)>> = const { RefCell::new(Vec::new()) };
 }
 
 static MAIN_HWND: OnceLock<isize> = OnceLock::new();
@@ -75,15 +75,36 @@ fn with_app(msg: u32, w: WPARAM, l: LPARAM, f: impl FnOnce(&mut App)) {
                 }
             }
         }
-        Err(_) => post(WM_APP_REPOST, msg as usize, ((w.0 as isize) << 16) ^ l.0),
+        Err(_) => DEFERRED.with(|d| d.borrow_mut().push((msg, w.0, l.0))),
     });
+    flush_deferred();
+}
+
+/// Re-posts messages that arrived while the app was busy (a re-entrant
+/// dispatch), with their original parameters, once it is free again.
+fn flush_deferred() {
+    let free = APP.with(|cell| cell.try_borrow_mut().is_ok());
+    if free {
+        for (msg, w, l) in DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut())) {
+            post(msg, w, l);
+        }
+    }
 }
 
 unsafe extern "system" fn win_event(_: HWINEVENTHOOK, event: u32, hwnd: HWND, id_object: i32, id_child: i32, _: u32, _: u32) {
     if id_object != 0 || id_child != 0 || hwnd.is_invalid() {
         return; // only whole windows (OBJID_WINDOW, CHILDID_SELF)
     }
-    QUEUE.with(|q| q.borrow_mut().push_back((event, hwnd.0 as isize)));
+    let item = (event, hwnd.0 as isize);
+    QUEUE.with(|q| {
+        let mut q = q.borrow_mut();
+        // A dragged or animating window reports dozens of moves per batch;
+        // handling one of them is the same as handling all of them.
+        if event == EVENT_OBJECT_LOCATIONCHANGE && q.contains(&item) {
+            return;
+        }
+        q.push_back(item);
+    });
     if !QUEUE_POSTED.with(|p| p.replace(true)) {
         post(WM_APP_EVENTS, 0, 0);
     }
@@ -133,14 +154,6 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     }
                 }
                 WM_LBUTTONDBLCLK => shell::open_settings("settings", None),
-                _ => {}
-            }
-        }
-        WM_APP_REPOST => {
-            // A deferred message; re-dispatch the cheap ones that carry no payload.
-            match w.0 as u32 {
-                input::WM_APP_MOUSE => post(input::WM_APP_MOUSE, 0, 0),
-                WM_TIMER => post(WM_TIMER, app::TIMER_VERIFY, 0),
                 _ => {}
             }
         }

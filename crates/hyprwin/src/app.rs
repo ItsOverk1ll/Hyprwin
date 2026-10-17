@@ -303,6 +303,9 @@ impl App {
         if self.wm.windows.contains_key(&id) {
             return;
         }
+        if classify::quick_reject(h, self.own_pid).is_some() {
+            return;
+        }
         let m = classify::read_meta(h);
         // Test hook: only manage windows whose title matches (used by tests/live).
         if let Some(re) = manage_only() {
@@ -504,6 +507,21 @@ impl App {
         }
         let mut ledger_dirty = false;
         let plan = self.plan_animations(&fx);
+        // Record every window about to be hidden with one ledger write, not
+        // one per window (a workspace switch hides them all at once).
+        let mut to_hide: HashSet<WinId> = HashSet::new();
+        for e in &fx {
+            if let Effect::Hide(id) = e {
+                let key = hwnd(*id).0 as isize;
+                if !self.ledger.hidden.contains_key(&key) {
+                    self.ledger.hidden.insert(key, HideMethod::Cloak);
+                    to_hide.insert(*id);
+                }
+            }
+        }
+        if !to_hide.is_empty() {
+            let _ = self.ledger.save();
+        }
         for e in fx {
             match e {
                 Effect::Show(id) if plan.defer_show.contains(&id) => {}
@@ -518,8 +536,16 @@ impl App {
                 }
                 Effect::Place { id, rect, anim } => self.place(id, rect, anim),
                 Effect::Hide(id) => {
-                    self.hide(id);
-                    ledger_dirty = true;
+                    // Recorded above, or shown again by an earlier effect in
+                    // this batch (record it now); otherwise hidden already.
+                    let key = hwnd(id).0 as isize;
+                    if to_hide.remove(&id) || !self.ledger.hidden.contains_key(&key) {
+                        if self.ledger.hidden.insert(key, HideMethod::Cloak).is_none() {
+                            let _ = self.ledger.save();
+                        }
+                        self.hide(id);
+                        ledger_dirty = true;
+                    }
                 }
                 Effect::Show(id) => {
                     self.reveal(id);
@@ -625,15 +651,11 @@ impl App {
         self.schedule_verify();
     }
 
+    /// Hides a window that `apply` has already recorded in the ledger as
+    /// cloaked (record first, then act: a crash in between still restores it).
     fn hide(&mut self, id: WinId) {
         let h = hwnd(id);
         let key = h.0 as isize;
-        if self.ledger.hidden.contains_key(&key) {
-            return;
-        }
-        // Record first, then act: a crash in between still restores it.
-        self.ledger.hidden.insert(key, HideMethod::Cloak);
-        let _ = self.ledger.save();
         if let Err(e) = cloak::set_cloaked(h, true) {
             let r = window::window_rect(h).unwrap_or_default();
             debug!("cloak {:#x} failed ({e}); parking off-screen", id);

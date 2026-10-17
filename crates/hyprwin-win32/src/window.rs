@@ -71,9 +71,14 @@ pub fn process_path(pid: u32) -> Option<String> {
 
 /// Hyprland-style `class`: executable file name without `.exe`, lowercased.
 pub fn process_class(pid: u32) -> Option<String> {
-    let path = process_path(pid)?;
-    let file = path.rsplit(['\\', '/']).next()?;
-    Some(file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(file).to_lowercase())
+    class_from_path(&process_path(pid)?)
+}
+
+/// `class` from an image path (see [`process_class`]).
+pub fn class_from_path(path: &str) -> Option<String> {
+    let file = path.rsplit(['\\', '/']).next().filter(|f| !f.is_empty())?;
+    let lower = file.to_lowercase();
+    Some(lower.strip_suffix(".exe").map(str::to_string).unwrap_or(lower))
 }
 
 /// All top-level windows in z-order (topmost first).

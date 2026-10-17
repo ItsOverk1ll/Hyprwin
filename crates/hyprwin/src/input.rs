@@ -15,7 +15,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, MAPVK_VSC_TO_VK_EX, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, MAPVK_VSC_TO_VK_EX, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW, TranslateMessage,
@@ -149,6 +149,18 @@ impl HookState {
         }
         m
     }
+
+    /// Forgets modifiers Windows says are up. A key released on the secure
+    /// desktop (Win+L, Ctrl+Alt+Del, a UAC prompt) never reaches the hook, and
+    /// a Super that stays "down" would turn ordinary typing into binds.
+    /// Modifiers are never swallowed, so the system's key state is reliable.
+    fn drop_stale_modifiers(&mut self) {
+        for vk in [0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5] {
+            if self.down[vk] && unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 == 0 {
+                self.down[vk] = false;
+            }
+        }
+    }
 }
 
 thread_local! {
@@ -221,10 +233,16 @@ fn handle_key(vk: usize, down: bool) -> bool {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         if down {
-            let repeat = s.down[vk];
+            // A key whose release was lost (see `drop_stale_modifiers`) would
+            // look like auto-repeat and its binds would never fire again.
+            // Swallowed keys are never down for Windows, so they cannot be checked.
+            let repeat = s.down[vk] && (s.swallowed[vk] || unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 != 0);
             s.down[vk] = true;
             if is_modifier(vk) {
                 return false;
+            }
+            if s.mods() != 0 {
+                s.drop_stale_modifiers();
             }
             let mods = s.mods();
             if is_emergency(vk, mods) {
@@ -287,7 +305,13 @@ fn handle_mouse(msg: u32, m: &MSLLHOOKSTRUCT) -> bool {
         post(WM_APP_DRAG, DRAG_END, pos);
         return true;
     }
-    let mods = STATE.with(|s| s.borrow().mods());
+    let mods = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.mods() != 0 {
+            s.drop_stale_modifiers();
+        }
+        s.mods()
+    });
     let key = match msg {
         WM_LBUTTONDOWN => Key::MouseLeft,
         WM_RBUTTONDOWN => Key::MouseRight,

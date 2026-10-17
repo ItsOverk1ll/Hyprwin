@@ -97,12 +97,25 @@ impl Ledger {
         Self::from_json(&std::fs::read_to_string(ledger_path()).ok()?)
     }
 
+    /// Writes the ledger. Skipped when this process last wrote exactly the
+    /// same content to the same file: callers save after every change "just
+    /// in case", and each write is a file create + rename on the UI thread.
     pub fn save(&self) -> std::io::Result<()> {
+        use std::sync::Mutex;
+        static LAST: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
+        let path = ledger_path();
+        let json = self.to_json();
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.as_ref().is_some_and(|(p, j)| *p == path && *j == json) && path.exists() {
+            return Ok(());
+        }
         let dir = state_dir();
         std::fs::create_dir_all(&dir)?;
         let tmp = dir.join("ledger.json.tmp");
-        std::fs::write(&tmp, self.to_json())?;
-        std::fs::rename(&tmp, ledger_path())
+        std::fs::write(&tmp, &json)?;
+        std::fs::rename(&tmp, &path)?;
+        *last = Some((path, json));
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {

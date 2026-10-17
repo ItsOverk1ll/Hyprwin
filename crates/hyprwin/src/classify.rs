@@ -38,8 +38,9 @@ pub fn read_meta(h: HWND) -> Meta {
             pid = p;
         }
     }
+    // One process query for both: `class` is derived from the image path.
     let exe = window::process_path(pid).unwrap_or_default();
-    let class = window::process_class(pid).unwrap_or_else(|| winclass.to_lowercase());
+    let class = window::class_from_path(&exe).unwrap_or_else(|| winclass.to_lowercase());
     let owner = unsafe { GetWindow(h, GW_OWNER) }.map(|o| o.0 as isize).unwrap_or(0);
     Meta {
         class,
@@ -144,6 +145,33 @@ const IGNORED_CLASSES: &[&str] = &[
     "Chrome_RenderWidgetHostHWND",
     "CEF-OSC-WIDGET",
 ];
+
+/// The cheap subset of [`classify`]'s `Ignore` checks, run before
+/// [`read_meta`] (which opens the process). Windows sends create/show/name
+/// events for every tooltip, menu and child control on the desktop, and
+/// nearly all of them stop here.
+pub fn quick_reject(h: HWND, own_pid: u32) -> Option<&'static str> {
+    if !window::is_visible(h) {
+        return Some("not visible");
+    }
+    if window::style(h) & WS_CHILD.0 != 0 || unsafe { GetAncestor(h, GA_ROOT) } != h {
+        return Some("child window");
+    }
+    let ex = window::ex_style(h);
+    if ex & WS_EX_TOOLWINDOW.0 != 0 && ex & WS_EX_APPWINDOW.0 == 0 {
+        return Some("tool window");
+    }
+    if ex & WS_EX_NOACTIVATE.0 != 0 {
+        return Some("no-activate window");
+    }
+    if window::pid(h) == own_pid {
+        return Some("our own window");
+    }
+    if IGNORED_CLASSES.contains(&window::class_name(h).as_str()) {
+        return Some("shell/system class");
+    }
+    None
+}
 
 pub fn classify(h: HWND, m: &Meta, own_pid: u32) -> Verdict {
     if !window::is_visible(h) {
