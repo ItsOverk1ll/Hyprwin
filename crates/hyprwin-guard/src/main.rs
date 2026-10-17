@@ -9,9 +9,9 @@
 #![windows_subsystem = "windows"]
 
 use hyprwin_win32::ledger::Ledger;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
-    CreateMutexW, OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess,
+    CreateMutexW, OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -28,8 +28,13 @@ fn log(msg: &str) {
     }
 }
 
-fn restore(reason: &str) {
+/// Replays the ledger, if it is `pid`'s. After a restart the ledger may
+/// already belong to the new daemon, whose hidden windows must stay hidden.
+fn restore(reason: &str, pid: u32) {
     match Ledger::load() {
+        Some(l) if l.daemon_pid != pid && l.daemon_pid != 0 => {
+            log(&format!("{reason}: the ledger belongs to pid {} now; leaving it alone", l.daemon_pid));
+        }
         Some(mut l) if !l.is_empty() => {
             let n = l.restore_all();
             let _ = l.save();
@@ -41,9 +46,15 @@ fn restore(reason: &str) {
 
 fn main() {
     let name = hyprwin_win32::wide("Local\\hyprwin-guard");
-    let _m = unsafe { CreateMutexW(None, true, PCWSTR(name.as_ptr())) };
+    let m = unsafe { CreateMutexW(None, true, PCWSTR(name.as_ptr())) }.unwrap_or_default();
     if unsafe { windows::Win32::Foundation::GetLastError() }.0 == 183 {
-        return; // another guard is already watching
+        // Another guard holds the lock. After a restart (an update) that is
+        // usually the previous daemon's guard, still restoring before it
+        // exits: wait for it rather than leave this daemon unguarded.
+        let r = unsafe { WaitForSingleObject(m, 10_000) };
+        if r != WAIT_OBJECT_0 && r != WAIT_ABANDONED {
+            return; // a guard is still watching
+        }
     }
     hyprwin_win32::com_init();
     let pid: u32 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -63,7 +74,7 @@ fn main() {
     loop {
         let r = unsafe { MsgWaitForMultipleObjects(Some(&[daemon]), false, u32::MAX, QS_ALLINPUT) };
         if r == WAIT_OBJECT_0 {
-            restore("daemon exited");
+            restore("daemon exited", pid);
             break;
         }
         let mut msg = MSG::default();
@@ -81,7 +92,7 @@ fn main() {
             unsafe {
                 let _ = TerminateProcess(daemon, 2);
             }
-            restore("emergency");
+            restore("emergency", pid);
             break;
         }
     }

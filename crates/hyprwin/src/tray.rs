@@ -38,6 +38,25 @@ fn icon_from_ico(bytes: &[u8], size: i32) -> Option<HICON> {
     unsafe { CreateIconFromResourceEx(data, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR).ok() }
 }
 
+/// The tray icon at `size` px, created once: icons are never freed, so
+/// creating one per update leaked a handle on every pause, resume and
+/// notification.
+fn tray_icon(size: i32) -> HICON {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<i32, isize>>> = Mutex::new(None);
+    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let map = c.get_or_insert_with(HashMap::new);
+    if let Some(&h) = map.get(&size) {
+        return HICON(h as *mut _);
+    }
+    let icon = icon_from_ico(TRAY_ICO, size).unwrap_or_default();
+    if !icon.is_invalid() {
+        map.insert(size, icon.0 as isize);
+    }
+    icon
+}
+
 fn small_icon_size() -> i32 {
     unsafe {
         let dpi = windows::Win32::UI::HiDpi::GetDpiForSystem();
@@ -52,7 +71,7 @@ fn data(main: HWND, paused: bool) -> NOTIFYICONDATAW {
         uID: TRAY_ID,
         uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP,
         uCallbackMessage: WM_APP_TRAY,
-        hIcon: icon_from_ico(TRAY_ICO, small_icon_size()).unwrap_or_default(),
+        hIcon: tray_icon(small_icon_size()),
         ..Default::default()
     };
     let tip = if paused { "hyprwin — paused" } else { "hyprwin — tiling" };
@@ -94,7 +113,7 @@ pub fn notify(main: HWND, title: &str, text: &str) {
     for (i, c) in text.encode_utf16().take(nid.szInfo.len() - 1).enumerate() {
         nid.szInfo[i] = c;
     }
-    nid.hBalloonIcon = icon_from_ico(TRAY_ICO, 32).unwrap_or_default();
+    nid.hBalloonIcon = tray_icon(32);
     unsafe {
         let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
