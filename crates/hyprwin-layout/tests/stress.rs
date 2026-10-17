@@ -161,6 +161,14 @@ fn new_window(rng: &mut Rng, wm: &Wm) -> NewWindow {
 }
 
 fn sel(rng: &mut Rng) -> WsSel {
+    if rng.chance(8) {
+        // Hostile input from binds or hyprwinctl.
+        let junk = ["9223372036854775807", "r+9223372036854775807", "r-9223372036854775807", "+9223372036854775806", "e+999999999", "m-9223372036854775807", "-1", "0", "name:", "name:special:x", "special:", "", " ", "\u{202e}", "previous", "empty", "e-3", "m+0"];
+        let s = junk[rng.below(junk.len() as u64) as usize];
+        if let Some(sel) = WsSel::parse(s) {
+            return sel;
+        }
+    }
     match rng.below(10) {
         0 => WsSel::Relative(if rng.chance(50) { 1 } else { -1 }),
         1 => WsSel::Previous,
@@ -304,12 +312,12 @@ fn step(wm: &mut Wm, rng: &mut Rng, next_id: &mut WinId) -> String {
             t
         }
         27 => {
-            let s = ["+1", "-1", "l", "r", "A", "B"][rng.below(6) as usize];
+            let s = ["+1", "-1", "l", "r", "A", "B", "", "99", "-5", "\\\\.\\DISPLAY1", "current"][rng.below(11) as usize];
             wm.focus_monitor(s);
             format!("focus_monitor({s})")
         }
         28 => {
-            let s = ["+1", "-1", "l", "r", "A", "B"][rng.below(6) as usize];
+            let s = ["+1", "-1", "l", "r", "A", "B", "", "99", "current"][rng.below(9) as usize];
             let ws = if rng.chance(50) { Some(sel(rng)) } else { None };
             let t = format!("move_workspace_to_monitor({ws:?}, {s})");
             wm.move_workspace_to_monitor(ws.as_ref(), s);

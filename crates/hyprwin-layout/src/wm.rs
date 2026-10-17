@@ -443,12 +443,12 @@ impl Wm {
         let cycle = |list: &[WsId], d: i64| -> Option<WsId> {
             let i = list.iter().position(|&x| x == cur)? as i64;
             let n = list.len() as i64;
-            Some(list[((i + d).rem_euclid(n)) as usize])
+            Some(list[((i + d.rem_euclid(n)).rem_euclid(n)) as usize])
         };
         let id = match sel {
             WsSel::Id(n) => *n,
             WsSel::Name(n) => self.named_ws(n, false),
-            WsSel::Relative(d) => (cur + d).max(1),
+            WsSel::Relative(d) => cur.saturating_add(*d).max(1),
             WsSel::MonitorRelative(d) => cycle(&on_mon, *d)?,
             WsSel::OpenRelative(d) => cycle(&open, *d)?,
             WsSel::Previous => self.monitors[mon].previous?,
@@ -1249,7 +1249,7 @@ impl Wm {
         let src = w.ws;
         let mon = self.workspaces.get(&src).map(|x| x.monitor).unwrap_or(self.focused_monitor);
         let was_focused = self.focus == Some(id);
-        for n in (src + 1)..(src + 100) {
+        for n in src.saturating_add(1)..src.saturating_add(100) {
             // Skip workspaces that live on (or are shown on) another monitor.
             if let Some(ws) = self.workspaces.get(&n) {
                 if ws.monitor != mon {
@@ -1760,6 +1760,22 @@ impl Wm {
         };
         let source = self.workspaces[&id].monitor;
         if source == target {
+            return self.sync();
+        }
+        if id < 0 {
+            // A scratchpad is never a monitor's regular workspace: it moves,
+            // and stays open if it was open.
+            let was_open = self.monitors.get(source).is_some_and(|m| m.special == Some(id));
+            for m in &mut self.monitors {
+                if m.special == Some(id) {
+                    m.special = None;
+                }
+            }
+            self.workspaces.get_mut(&id).unwrap().monitor = target;
+            if was_open {
+                self.monitors[target].special = Some(id);
+            }
+            self.invalidate_all();
             return self.sync();
         }
         self.workspaces.get_mut(&id).unwrap().monitor = target;
