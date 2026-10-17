@@ -784,10 +784,9 @@ impl App {
         let minimized = self.wm.windows.get(&id).is_none_or(|w| w.minimized);
         if self.wm.desired_rect(id).is_none() && !minimized {
             warn!("{:#x} was uncloaked by the system while its workspace is hidden; hiding it again", id);
-            if cloak::set_cloaked(h, true).is_err() {
-                self.ledger.hidden.remove(&key);
-                let _ = self.ledger.save();
-            }
+            // Recorded as cloaked already; parks it off-screen if the shell
+            // (e.g. a restarting explorer) cannot cloak right now.
+            self.hide(id);
         } else {
             self.ledger.hidden.remove(&key);
             let _ = self.ledger.save();
