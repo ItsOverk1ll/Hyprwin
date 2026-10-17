@@ -20,12 +20,19 @@ fn usage() -> ! {
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    // Flags come before the command; later "-j"s belong to its arguments
-    // (e.g. `dispatch exec mytool -j`).
+    // `-j` may come before or after a query (`hyprctl clients -j` is common),
+    // but after `dispatch` everything belongs to the dispatcher
+    // (`dispatch exec mytool -j`).
+    let is_flag = |a: &String| a == "-j" || a == "--json";
     let mut json = false;
-    while args.first().is_some_and(|a| a == "-j" || a == "--json") {
+    while args.first().is_some_and(is_flag) {
         json = true;
         args.remove(0);
+    }
+    if args.first().is_some_and(|c| c != "dispatch") {
+        let before = args.len();
+        args.retain(|a| !is_flag(a));
+        json |= args.len() != before;
     }
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         usage();
