@@ -168,6 +168,52 @@ pub fn request(req: &str) -> std::io::Result<String> {
     Ok(out)
 }
 
+/// Waits until `n` bytes can be read from the pipe without blocking, or the
+/// deadline passes. A client that connects and never (fully) sends its
+/// request must not hold a server thread forever.
+fn wait_for_bytes(f: &std::fs::File, n: usize, deadline: std::time::Instant) -> std::io::Result<usize> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+    let h = HANDLE(f.as_raw_handle() as _);
+    let mut nap = 1;
+    loop {
+        let mut avail = 0u32;
+        unsafe { PeekNamedPipe(h, None, 0, None, Some(&mut avail), None) }.map_err(|e| std::io::Error::other(e.to_string()))?;
+        if avail as usize >= n {
+            return Ok(avail as usize);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "client sent no complete request in time"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(nap));
+        nap = (nap * 2).min(20);
+    }
+}
+
+/// Server helper: reads one length-prefixed request, giving the client
+/// `timeout` to send all of it.
+pub fn read_request_timeout(f: &mut std::fs::File, timeout: std::time::Duration) -> std::io::Result<String> {
+    let deadline = std::time::Instant::now() + timeout;
+    wait_for_bytes(f, 4, deadline)?;
+    let mut len = [0u8; 4];
+    f.read_exact(&mut len)?;
+    let n = u32::from_le_bytes(len) as usize;
+    if n > 1 << 20 {
+        return Err(std::io::Error::other("request too large"));
+    }
+    // Read whatever has arrived: a large request fills the pipe buffer
+    // and the client only writes more once the server reads.
+    let mut buf = vec![0u8; n];
+    let mut got = 0;
+    while got < n {
+        let avail = wait_for_bytes(f, 1, deadline)?;
+        let chunk = (n - got).min(avail);
+        f.read_exact(&mut buf[got..got + chunk])?;
+        got += chunk;
+    }
+    String::from_utf8(buf).map_err(|_| std::io::Error::other("request is not UTF-8"))
+}
+
 /// Server helper: reads one length-prefixed request.
 pub fn read_request(f: &mut std::fs::File) -> std::io::Result<String> {
     let mut len = [0u8; 4];

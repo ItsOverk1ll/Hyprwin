@@ -353,7 +353,7 @@ fn start_ipc(tx: Sender<IpcJob>, events: Receiver<String>) {
                 // without a listener (other clients would fail to connect).
                 let tx = tx.clone();
                 let served = std::thread::Builder::new().name("hyprwin-ipc-client".into()).spawn(move || {
-                    let Ok(req) = hyprwin_ipc::read_request(&mut f) else { return };
+                    let Ok(req) = hyprwin_ipc::read_request_timeout(&mut f, Duration::from_secs(2)) else { return };
                     let (rtx, rrx) = channel();
                     if tx.send((req, rtx)).is_err() {
                         return;

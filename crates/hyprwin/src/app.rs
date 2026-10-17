@@ -746,6 +746,33 @@ impl App {
         }
     }
 
+    /// A window hyprwin cloaked for a hidden workspace was uncloaked by
+    /// someone else (Windows does this when a cloaked window is restored or
+    /// activated): hide it again, or forget the stale ledger entry if it
+    /// should be visible after all. Without this it stayed on screen, on top
+    /// of the workspace being shown.
+    fn keep_hidden(&mut self, id: WinId) {
+        let h = hwnd(id);
+        let key = h.0 as isize;
+        if !matches!(self.ledger.hidden.get(&key), Some(HideMethod::Cloak)) || self.is_animating(id) || self.closing.contains_key(&id) {
+            return;
+        }
+        if dwm::cloaked_state(h) != 0 {
+            return; // still hidden
+        }
+        let minimized = self.wm.windows.get(&id).is_none_or(|w| w.minimized);
+        if self.wm.desired_rect(id).is_none() && !minimized {
+            warn!("{:#x} was uncloaked by the system while its workspace is hidden; hiding it again", id);
+            if cloak::set_cloaked(h, true).is_err() {
+                self.ledger.hidden.remove(&key);
+                let _ = self.ledger.save();
+            }
+        } else {
+            self.ledger.hidden.remove(&key);
+            let _ = self.ledger.save();
+        }
+    }
+
     fn drawn_borders(&self) -> bool {
         self.cfg.border_size > 0 && crate::border::needed(self.cfg.border_size, &self.cfg.active_gradient)
     }
@@ -817,6 +844,9 @@ impl App {
                 self.unmanage(id);
                 desired_all = self.wm.desired_rects();
                 continue;
+            }
+            if self.ledger.hidden.contains_key(&(h.0 as isize)) {
+                self.keep_hidden(id);
             }
             if self.is_animating(id) {
                 self.schedule_verify();
@@ -970,6 +1000,8 @@ impl App {
             EVENT_OBJECT_UNCLOAKED => {
                 if !managed && !ours {
                     self.try_manage(h);
+                } else if managed && ours {
+                    self.keep_hidden(id);
                 }
             }
             EVENT_OBJECT_DESTROY => {

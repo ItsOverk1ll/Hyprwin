@@ -178,6 +178,12 @@ try {
         if ($w.hidden -and -not $w.hyprwin.minimized -and -not $hidden) { $bad += "$($w.title): should be hidden (ws $($w.workspace.id))" }
         if (-not $w.hidden -and $hidden) { $bad += "$($w.title): cloaked but on a shown workspace" }
     }
+    if ($bad.Count -gt 0) {
+        # Name the cause: what the daemon logged about those windows.
+        $addrs = $c | Where-Object { $bad -match [regex]::Escape($_.title) } | ForEach-Object { $_.address.TrimStart('0x').TrimStart('0') }
+        $lines = Get-Content "$state\hyprwin.log" -ErrorAction SilentlyContinue | Where-Object { $l = $_; $addrs | Where-Object { $l -match $_ } }
+        Write-Host "    log lines for those windows (last 30):"; $lines | Select-Object -Last 30 | ForEach-Object { Write-Host "      $_" }
+    }
     Check 'every window is shown/hidden as the model says' ($bad.Count -eq 0) ($bad -join '; ')
     $shown = $c | Where-Object { -not $_.hidden -and -not $_.floating -and $_.fullscreen -eq 0 }
     $over = @()
@@ -197,9 +203,14 @@ try {
     $n = @(Get-Content $evFile -ErrorAction SilentlyContinue).Count
     Check 'a second event reader kept getting events despite the stalled one' ($n -gt 50) "events=$n"
 
+    # The 3 silent clients are still connected: the daemon must have dropped
+    # them after its 2 s request timeout instead of keeping a thread each.
+    Start-Sleep -Seconds 3
     $after = Sample $d
     Write-Host "  after: $after"
-    Check 'threads back near baseline (no stuck client threads)' ($after.threads -le $before.threads + 4) "$($before.threads) -> $($after.threads)"
+    Check 'threads back near baseline (silent clients timed out)' ($after.threads -le $before.threads + 2) "$($before.threads) -> $($after.threads)"
+    $dropped = $silent | Where-Object { try { $_.WriteByte(1); $_.Flush(); $false } catch { $true } }
+    Check 'silent clients were disconnected by the daemon' (@($dropped).Count -eq 3) "$(@($dropped).Count)/3"
     Check 'GDI objects stable' ($after.gdi - $before.gdi -le 10) "$($before.gdi) -> $($after.gdi)"
     Check 'USER objects stable' ($after.user - $before.user -le 10) "$($before.user) -> $($after.user)"
     Check 'memory stable (<= +15 MB)' ($after.mb - $before.mb -le 15) "$($before.mb) -> $($after.mb) MB"
