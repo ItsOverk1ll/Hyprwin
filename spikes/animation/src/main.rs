@@ -316,7 +316,40 @@ fn print_stats(name: &str, s: &Stats, expected: f64) {
 /// Optional minimum outer size for test windows (like Steam/Discord enforce).
 static TARGET_MIN: std::sync::OnceLock<(i32, i32)> = std::sync::OnceLock::new();
 
+/// Misbehaviour for robustness tests (`HYPRWIN_TARGET_MODE`):
+/// `hang` stops processing messages 1.5 s after start (a hung app),
+/// `fight` moves itself back whenever it is moved, `titles` renames itself
+/// every few milliseconds.
+static TARGET_MODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static TARGET_HOME: std::sync::OnceLock<(i32, i32, i32, i32)> = std::sync::OnceLock::new();
+const TIMER_MISBEHAVE: usize = 77;
+
 unsafe extern "system" fn target_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    let mode = TARGET_MODE.get().map(String::as_str).unwrap_or("");
+    if m == WM_TIMER && w.0 == TIMER_MISBEHAVE {
+        match mode {
+            "hang" => std::thread::sleep(std::time::Duration::from_secs(3600)),
+            "titles" => {
+                static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut t = [0u16; 256];
+                let len = unsafe { GetWindowTextW(h, &mut t) } as usize;
+                let base: String = String::from_utf16_lossy(&t[..len]).split(" #").next().unwrap_or("").to_string();
+                let new = hyprwin_win32::wide(&format!("{base} #{n}"));
+                let _ = unsafe { SetWindowTextW(h, PCWSTR(new.as_ptr())) };
+            }
+            _ => {}
+        }
+        return LRESULT(0);
+    }
+    if m == WM_WINDOWPOSCHANGED && mode == "fight" {
+        if let Some(&(x, y, ww, hh)) = TARGET_HOME.get() {
+            let wp = unsafe { &*(l.0 as *const WINDOWPOS) };
+            if (wp.x, wp.y, wp.cx, wp.cy) != (x, y, ww, hh) && wp.flags.0 & SWP_NOMOVE.0 == 0 {
+                let _ = unsafe { SetWindowPos(h, None, x, y, ww, hh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS) };
+            }
+        }
+    }
     if m == WM_DESTROY {
         unsafe { PostQuitMessage(0) };
         return LRESULT(0);
@@ -370,6 +403,20 @@ fn run_target(args: &[String]) {
         )
         .unwrap();
         let _ = window::set_visible_rect(h, Rect::new(n[0], n[1], n[2], n[3]));
+        if let Ok(mode) = std::env::var("HYPRWIN_TARGET_MODE") {
+            if let Ok(r) = window::window_rect(h) {
+                TARGET_HOME.set((r.x, r.y, r.w, r.h)).ok();
+            }
+            let every = match mode.as_str() {
+                "hang" => 1500,
+                "titles" => 5,
+                _ => 0,
+            };
+            TARGET_MODE.set(mode).ok();
+            if every > 0 {
+                SetTimer(Some(h), TIMER_MISBEHAVE, every, None);
+            }
+        }
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);

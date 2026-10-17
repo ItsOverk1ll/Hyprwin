@@ -89,6 +89,8 @@ pub struct App {
     drag: Option<Drag>,
     last_hover: isize,
     border_override: HashMap<WinId, u32>,
+    /// Tiled windows re-stacked under the floats; checked for always-on-top.
+    restacked: HashSet<WinId>,
     events: Sender<String>,
     verify_pending: bool,
     pub quit: bool,
@@ -159,6 +161,7 @@ impl App {
             drag: None,
             last_hover: 0,
             border_override: HashMap::new(),
+            restacked: HashSet::new(),
             events,
             verify_pending: false,
             quit: false,
@@ -633,7 +636,8 @@ impl App {
                 return;
             }
             if IsZoomed(h).as_bool() {
-                let _ = ShowWindow(h, SW_RESTORE);
+                // Async: a hung app must never block the daemon.
+                let _ = ShowWindowAsync(h, SW_RESTORE);
             }
         }
         if dwm::frame_bounds(h).ok() == Some(rect) {
@@ -708,7 +712,7 @@ impl App {
     /// window on Windows raises it to the top, so slot it directly *below* the
     /// lowest visible floating window instead. The request is queued on the
     /// tiled window's own thread, after its activation, so it cannot race.
-    fn keep_floating_on_top(&self, focused: WinId) {
+    fn keep_floating_on_top(&mut self, focused: WinId) {
         let Some(w) = self.wm.windows.get(&focused) else { return };
         if w.floating || self.wm.fullscreen_of(focused).is_some() {
             return;
@@ -736,12 +740,29 @@ impl App {
         let h = hwnd(focused);
         let was_topmost = window::ex_style(h) & WS_EX_TOPMOST.0 != 0;
         unsafe {
-            // Synchronous (only z-order, no resize): we check the result below.
-            let _ = SetWindowPos(h, Some(lowest), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            // Belt and braces: we must never leave a window always-on-top.
-            if !was_topmost && window::ex_style(h) & WS_EX_TOPMOST.0 != 0 {
-                warn!("{:#x} became always-on-top while re-ordering; undoing", focused);
-                let _ = SetWindowPos(h, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            // Async: queued on the window's own thread. A synchronous call
+            // waits for the app to answer, forever if it is hung, which froze
+            // the whole daemon.
+            let _ = SetWindowPos(h, Some(lowest), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+        if !was_topmost {
+            // Belt and braces, checked once the move has happened (verify):
+            // we must never leave a window always-on-top.
+            self.restacked.insert(focused);
+            self.schedule_verify();
+        }
+    }
+
+    /// Undoes always-on-top on windows re-stacked by `keep_floating_on_top`
+    /// that Windows made topmost.
+    fn check_restacked(&mut self) {
+        for id in std::mem::take(&mut self.restacked) {
+            let h = hwnd(id);
+            if window::is_alive(h) && window::ex_style(h) & WS_EX_TOPMOST.0 != 0 && self.wm.windows.get(&id).is_some_and(|w| !w.floating) {
+                warn!("{:#x} became always-on-top while re-ordering; undoing", id);
+                unsafe {
+                    let _ = SetWindowPos(h, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                }
             }
         }
     }
@@ -817,6 +838,7 @@ impl App {
             self.verify_pending = false;
             return;
         }
+        self.check_restacked();
         self.verify_pending = false;
         unsafe {
             let _ = KillTimer(Some(self.main), TIMER_VERIFY);
@@ -1207,7 +1229,7 @@ impl App {
         let fx = self.wm.focus_window(id);
         self.apply(fx);
         unsafe {
-            let _ = SetWindowPos(root, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(root, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         }
     }
 
