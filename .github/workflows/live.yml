@@ -20,6 +20,8 @@ jobs:
         ref: [Cloud-Changes, main]
     runs-on: windows-latest
     timeout-minutes: 60
+    # main is the baseline for comparison: its known failures don't fail the run.
+    continue-on-error: ${{ matrix.ref == 'main' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +58,7 @@ jobs:
           $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar', 'chaos', 'misbehave', 'system', 'keys', 'setup'
           New-Item -ItemType Directory -Force live-results | Out-Null
           $summary = @()
+          $failed = 0
           foreach ($s in $suites) {
             $f = "tests\live\$s.ps1"
             if (-not (Test-Path $f)) { continue }
@@ -68,6 +71,7 @@ jobs:
             $out | Set-Content "live-results\$s.txt"
             $pass = ([regex]::Matches($out, '\[PASS\]')).Count
             $fails = ([regex]::Matches($out, '\[FAIL\][^\r\n]*') | ForEach-Object { $_.Value })
+            if ($code -ne 0 -or $fails.Count -gt 0) { $failed++ }
             $summary += "$s : exit=$code pass=$pass fail=$($fails.Count) ($([int]((Get-Date) - $t0).TotalSeconds)s)"
             $fails | ForEach-Object { $summary += "    $_" }
             Get-Process hyprwin, hyprwin-guard, animation-spike, notepad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -76,6 +80,9 @@ jobs:
           $summary | Set-Content live-results\SUMMARY.txt
           Write-Host "`n===== SUMMARY (${{ matrix.ref }}) ====="
           $summary | ForEach-Object { Write-Host $_ }
+          # The step's result is every suite's, not the last one's.
+          if ($failed -gt 0) { Write-Host "$failed suite(s) failed"; exit 1 }
+          exit 0
       - name: Collect logs
         if: always()
         shell: powershell
