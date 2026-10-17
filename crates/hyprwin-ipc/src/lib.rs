@@ -132,8 +132,10 @@ pub fn connect(name: &str, write: bool, timeout_ms: u32) -> std::io::Result<std:
     let access = if write { GENERIC_READ.0 | GENERIC_WRITE.0 } else { GENERIC_READ.0 };
     let start = Instant::now();
     let deadline = start + Duration::from_millis(timeout_ms as u64);
-    // A missing pipe usually means no daemon, so give up on that sooner.
-    let not_found_deadline = start + Duration::from_millis(timeout_ms.min(300) as u64);
+    // A missing pipe usually means no daemon, so give up on that quickly
+    // (the server re-listens within microseconds; callers such as the
+    // Settings window poll on their UI thread).
+    let not_found_deadline = start + Duration::from_millis(timeout_ms.min(50) as u64);
     loop {
         let h = unsafe { CreateFileW(PCWSTR(n.as_ptr()), access, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) };
         let now = Instant::now();
@@ -147,7 +149,7 @@ pub fn connect(name: &str, write: bool, timeout_ms: u32) -> std::io::Result<std:
             // ERROR_FILE_NOT_FOUND: no daemon, or it is between two pipe
             // instances for a moment. Retry briefly.
             Err(e) if e.code().0 as u32 == 0x8007_0002 && now < not_found_deadline => {
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(5));
             }
             Err(e) => return Err(std::io::Error::other(format!("{name}: {e}"))),
         }
