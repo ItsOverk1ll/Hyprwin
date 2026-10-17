@@ -1,0 +1,78 @@
+# Runs the live end-to-end suites (tests\live) on a real Windows desktop
+# session (GitHub's hosted runner), for this branch and for main side by side,
+# so environment quirks can be told apart from regressions.
+#
+# Only runs for pushes whose commit message contains "[live]", or by hand.
+name: Live tests
+
+on:
+  push:
+    branches: [Cloud-Changes]
+  workflow_dispatch:
+
+jobs:
+  live:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[live]')
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [Cloud-Changes, main]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.ref }}
+      - name: Build (release)
+        run: cargo build --release --workspace
+      - name: Environment
+        shell: powershell
+        run: |
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber | Format-List
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::AllScreens | Format-Table DeviceName, Bounds, WorkingArea, Primary
+          Get-Process explorer, dwm -ErrorAction SilentlyContinue | Format-Table Name, Id, SessionId
+          "interactive: $([Environment]::UserInteractive)  session: $((Get-Process -Id $PID).SessionId)"
+      - name: Live suites
+        shell: powershell
+        run: |
+          $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar'
+          New-Item -ItemType Directory -Force live-results | Out-Null
+          $summary = @()
+          foreach ($s in $suites) {
+            $f = "tests\live\$s.ps1"
+            if (-not (Test-Path $f)) { continue }
+            Write-Host "::group::$s"
+            $t0 = Get-Date
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $f 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $out
+            Write-Host "::endgroup::"
+            $out | Set-Content "live-results\$s.txt"
+            $pass = ([regex]::Matches($out, '\[PASS\]')).Count
+            $fails = ([regex]::Matches($out, '\[FAIL\][^\r\n]*') | ForEach-Object { $_.Value })
+            $summary += "$s : exit=$code pass=$pass fail=$($fails.Count) ($([int]((Get-Date) - $t0).TotalSeconds)s)"
+            $fails | ForEach-Object { $summary += "    $_" }
+            Get-Process hyprwin, hyprwin-guard, animation-spike, notepad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          }
+          $summary | Set-Content live-results\SUMMARY.txt
+          Write-Host "`n===== SUMMARY (${{ matrix.ref }}) ====="
+          $summary | ForEach-Object { Write-Host $_ }
+      - name: Collect logs
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force live-results\logs | Out-Null
+          Get-ChildItem -Path $env:TEMP, $env:LOCALAPPDATA -Recurse -Filter hyprwin.log -ErrorAction SilentlyContinue |
+            ForEach-Object -Begin { $i = 0 } -Process { Copy-Item $_.FullName "live-results\logs\$i-$($_.Directory.Name).log"; $i++ }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-results-${{ matrix.ref }}
+          path: live-results
