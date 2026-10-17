@@ -138,10 +138,15 @@ const BLOCK_END: &str = "# ---- end hyprwin managed block ----";
 /// over everything above).
 pub fn managed_block(theme: Option<&Path>) -> String {
     let theme_line = match theme {
-        Some(p) => format!("source = {}", p.display()),
+        Some(p) => format!("source = {}", esc_path(p)),
         None => "# (no theme selected)".to_string(),
     };
-    format!("{BLOCK_START}\n{theme_line}\nsource = {}\nsource = {}\n{BLOCK_END}\n", paths::settings_conf().display(), paths::binds_conf().display())
+    format!("{BLOCK_START}\n{theme_line}\nsource = {}\nsource = {}\n{BLOCK_END}\n", esc_path(&paths::settings_conf()), esc_path(&paths::binds_conf()))
+}
+
+/// A path as a hyprlang value (`#` in a folder name would start a comment).
+fn esc_path(p: &Path) -> String {
+    crate::parse::escape_value(&p.display().to_string())
 }
 
 /// Path of the theme currently selected in the managed block, if any.
@@ -151,7 +156,7 @@ pub fn active_theme(config_text: &str) -> Option<PathBuf> {
         .lines()
         .take_while(|l| *l != BLOCK_END)
         .filter_map(|l| l.trim().strip_prefix("source"))
-        .filter_map(|l| l.trim_start().strip_prefix('=').map(|p| PathBuf::from(p.trim())))
+        .filter_map(|l| l.trim_start().strip_prefix('=').map(|p| PathBuf::from(p.trim().replace("##", "#"))))
         .find(|p| p.parent().is_some_and(|d| d == paths::themes_dir()))
 }
 

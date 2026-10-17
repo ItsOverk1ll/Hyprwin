@@ -24,8 +24,9 @@ impl BindLine {
     }
 
     pub fn render(&self) -> String {
-        let arg = if self.arg.is_empty() { String::new() } else { format!(" {}", self.arg) };
-        format!("bind{} = {}, {}, {},{}", self.flags, self.mods, self.key.name(), self.dispatcher, arg)
+        let esc = crate::parse::escape_value;
+        let arg = if self.arg.is_empty() { String::new() } else { format!(" {}", esc(&self.arg)) };
+        format!("bind{} = {}, {}, {},{}", esc(&self.flags), self.mods, self.key.name(), esc(&self.dispatcher), arg)
     }
 }
 
@@ -281,5 +282,17 @@ mod tests {
         for k in key_choices() {
             assert!(Key::parse(&k).is_ok(), "{k}");
         }
+    }
+
+    #[test]
+    fn hashes_and_line_breaks_survive_a_save() {
+        let mut f = BindsFile::default();
+        let arg = "start https://example.com/#top && C:\\Tools\\C#\\app.exe".to_string();
+        f.set(None, BindLine { flags: String::new(), mods: Mods::parse("SUPER").unwrap(), key: Key::parse("N").unwrap(), dispatcher: "exec".into(), arg: arg.clone() });
+        f.set(None, BindLine { flags: String::new(), mods: Mods::parse("SUPER").unwrap(), key: Key::parse("M").unwrap(), dispatcher: "exec".into(), arg: "a\nbind = SUPER, Q, exit,".into() });
+        let back = BindsFile::parse(&f.render());
+        assert_eq!(back.binds.len(), 2, "{}", f.render());
+        assert_eq!(back.binds[0].arg, arg);
+        assert!(!back.binds.iter().any(|b| b.dispatcher == "exit"), "a line break injected a bind");
     }
 }

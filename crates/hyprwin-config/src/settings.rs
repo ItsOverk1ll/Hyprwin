@@ -24,7 +24,7 @@ impl SettingsFile {
     pub fn render(&self) -> String {
         let mut out = String::from("# Values chosen in hyprwin's Settings window. Edited by the app; safe to delete.\n");
         for (k, v) in &self.values {
-            out.push_str(&format!("{k} = {v}\n"));
+            out.push_str(&format!("{} = {}\n", crate::parse::escape_value(k), crate::parse::escape_value(v)));
         }
         out
     }

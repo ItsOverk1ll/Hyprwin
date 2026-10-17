@@ -52,6 +52,12 @@ pub fn parse_str(text: &str, name: &str) -> Parsed {
     p
 }
 
+/// Makes `value` safe to write as one hyprlang value: `#` would start a
+/// comment (written `##`), and a line break would start a new line.
+pub fn escape_value(value: &str) -> String {
+    value.replace(['\r', '\n'], " ").replace('#', "##")
+}
+
 fn strip_comment(line: &str) -> String {
     // A line that starts with '#' is a comment even if it is all '#'s (banners).
     if line.trim_start().starts_with('#') {
