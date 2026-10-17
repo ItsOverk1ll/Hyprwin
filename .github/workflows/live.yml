@@ -41,6 +41,8 @@ jobs:
       - name: Live suites
         shell: powershell
         run: |
+          # Suites report through their exit code; their stderr is not fatal here.
+          $ErrorActionPreference = 'Continue'
           $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar', 'chaos'
           New-Item -ItemType Directory -Force live-results | Out-Null
           $summary = @()
@@ -49,7 +51,7 @@ jobs:
             if (-not (Test-Path $f)) { continue }
             Write-Host "::group::$s"
             $t0 = Get-Date
-            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $f 2>&1 | Out-String
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $f 2>&1 | ForEach-Object { "$_" } | Out-String
             $code = $LASTEXITCODE
             Write-Host $out
             Write-Host "::endgroup::"

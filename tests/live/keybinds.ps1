@@ -23,7 +23,7 @@ function Check($name, $ok, $detail = '') {
     if ($ok) { Write-Host "  [PASS] $name $detail" } else { Write-Host "  [FAIL] $name $detail" -ForegroundColor Red; $script:fail++ }
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Settings([string[]]$a) { (Start-Process "$bin\hyprwin-settings.exe" -ArgumentList $a -PassThru -Wait).ExitCode }
 # PowerShell 5 passes a JSON array down the pipeline as one object: unroll it.
 function Binds { $b = Ctl -j binds | ConvertFrom-Json; foreach ($x in $b) { $x } }

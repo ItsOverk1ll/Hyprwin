@@ -20,7 +20,7 @@ function Check($name, $ok, $detail = '') {
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
 function Cloaked($h) { $v = 0; [void][W3]::DwmGetWindowAttribute($h, 14, [ref]$v, 4); $v }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Start-Hyprwin { $script:daemon = Start-Process "$bin\hyprwin.exe" -ArgumentList '--config', $cfg -PassThru; Start-Sleep -Milliseconds 1500 }
 function Layout {
     (Ctl -j clients | ConvertFrom-Json) | Sort-Object title | ForEach-Object { "$($_.title) ws=$($_.workspace.id) float=$($_.floating) at=$($_.at -join ',') size=$($_.size -join 'x')" }

@@ -23,7 +23,7 @@ function Check($name, $ok, $detail = '') {
     if ($ok) { Write-Host "  [PASS] $name $detail" } else { Write-Host "  [FAIL] $name $detail" -ForegroundColor Red; $script:fail++ }
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Layout { (Ctl -j clients | ConvertFrom-Json) | Sort-Object title | ForEach-Object { "$($_.title) ws=$($_.workspace.id) float=$($_.floating) at=$($_.at -join ',') size=$($_.size -join 'x')" } }
 
 Kill-Hyprwin; Start-Sleep -Milliseconds 300

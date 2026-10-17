@@ -34,7 +34,7 @@ function Check($name, $ok, $detail = '') {
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
 function Cloaked($h) { $v = 0; [void][C6]::DwmGetWindowAttribute($h, 14, [ref]$v, 4); $v }
 function Frame($h) { $r = New-Object RC; [void][C6]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); $r }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Settle { Start-Sleep -Milliseconds 150; $t0 = Get-Date; while ([C6]::FindWindow('hyprwin.ghost', [NullString]::Value) -ne [IntPtr]::Zero -and ((Get-Date) - $t0).TotalMilliseconds -lt 4000) { Start-Sleep -Milliseconds 20 }; Start-Sleep -Milliseconds 400 }
 function Alive($p) { $p.Refresh(); -not $p.HasExited }
 function Sample($p) {

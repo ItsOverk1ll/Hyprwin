@@ -57,7 +57,7 @@ function BorderSettles($h, $want, [bool]$equal = $true) {
     @($false, $detail)
 }
 function Near($a, $b) { $d = { param($x, $s) ($x -shr $s) -band 0xFF }; ([math]::Abs((& $d $a 0) - (& $d $b 0)) -le 24) -and ([math]::Abs((& $d $a 8) - (& $d $b 8)) -le 24) -and ([math]::Abs((& $d $a 16) - (& $d $b 16)) -le 24) }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Notepads { (Ctl -j clients | ConvertFrom-Json) | Where-Object { $_.class -eq 'notepad' } }
 
 Kill-Hyprwin; Start-Sleep -Milliseconds 300

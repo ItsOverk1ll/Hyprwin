@@ -36,7 +36,7 @@ function Settle-Layout($max = 10000) {
         Start-Sleep -Milliseconds 100
     }
 }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 
 Kill-Hyprwin; Start-Sleep -Milliseconds 300
 $cfg = "$env:TEMP\hyprwin-test.conf"
@@ -48,14 +48,17 @@ Start-Sleep -Milliseconds 1200
 
 $procs = @()
 try {
-    # Two windows at least 1400x1100, then one (2/3 of the screen wide, 1100 tall) that refuses to be narrower than 2/3 of the screen.
+    # Two windows of at least 36% x 51% of the screen, then one (2/3 of the screen wide) that refuses to be narrower than 2/3 of the screen.
     $mon = (Ctl -j monitors | ConvertFrom-Json) | Where-Object { $_.focused }
+    # Relative to the monitor (designed on 4K: 1400x1100 and 2/3 wide). Windows
+    # ignores a minimum larger than the screen, so fixed sizes broke on small ones.
     $wide = [int]($mon.width * 0.66)
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '230,20,20', 100, 100, 500, 400, 'hyprwin-ovf-a', '1400,1100' -PassThru
+    $minW = [int]($mon.width * 0.36); $minH = [int]($mon.height * 0.51)
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '230,20,20', 100, 100, 500, 400, 'hyprwin-ovf-a', "$minW,$minH" -PassThru
     Start-Sleep -Milliseconds 600
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,40,230', 200, 200, 500, 400, 'hyprwin-ovf-b', '1400,1100' -PassThru
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,40,230', 200, 200, 500, 400, 'hyprwin-ovf-b', "$minW,$minH" -PassThru
     Start-Sleep -Milliseconds 600
-    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,200,40', 300, 300, 500, 400, 'hyprwin-ovf-wide', "$wide,1100" -PassThru
+    $procs += Start-Process "$bin\animation-spike.exe" -ArgumentList 'target', '20,200,40', 300, 300, 500, 400, 'hyprwin-ovf-wide', "$wide,$minH" -PassThru
     Start-Sleep -Milliseconds 1000; Settle-Layout
 
     $c = Ctl -j clients | ConvertFrom-Json

@@ -26,7 +26,7 @@ function Check($name, $ok, $detail = '') {
     if ($ok) { Write-Host "  [PASS] $name $detail" } else { Write-Host "  [FAIL] $name $detail" -ForegroundColor Red; $script:fail++ }
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Frame($h) { $r = New-Object BR; [void][B9]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); $r }
 function Px($x, $y) { $dc = [B9]::GetDC([IntPtr]::Zero); $p = [B9]::GetPixel($dc, $x, $y); [void][B9]::ReleaseDC([IntPtr]::Zero, $dc); $p }
 # COLORREF 0x00BBGGRR -> is it close to rgb?

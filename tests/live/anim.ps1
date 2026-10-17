@@ -32,7 +32,7 @@ function Cloaked($h) { $v = 0; [void][A6]::DwmGetWindowAttribute($h, 14, [ref]$v
 function Frame($h) { $r = New-Object AR; [void][A6]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); "$($r.L),$($r.T),$($r.R - $r.L),$($r.B - $r.T)" }
 function BorderPx($h) { $r = New-Object AR; [void][A6]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); $dc = [A6]::GetDC([IntPtr]::Zero); $p = [A6]::GetPixel($dc, $r.L, [int](($r.T + $r.B) / 2)); [void][A6]::ReleaseDC([IntPtr]::Zero, $dc); $p }
 function Overlay { [A6]::FindWindow('hyprwin.ghost', [NullString]::Value) -ne [IntPtr]::Zero }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 # Polls for $ms: did an overlay appear, were the windows cloaked meanwhile?
 function Watch($ms, $hs) {
     $seen = @{ overlay = $false; cloaked = $false }
@@ -180,7 +180,7 @@ try {
     Ctl dispatch layoutmsg swapsplit | Out-Null
     Start-Sleep -Milliseconds 60
     $cl = ((Cloaked $ha) -ne 0) -or ((Cloaked $hb) -ne 0)
-    Get-Process hyprwin -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null }
+    Get-Process hyprwin -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 2500
     Check 'windows were cloaked when it died' $cl
     Check 'guard uncloaked them' ((Cloaked $ha) -eq 0 -and (Cloaked $hb) -eq 0)

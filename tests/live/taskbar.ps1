@@ -44,7 +44,7 @@ function Check($name, $ok, $detail = '') {
     if ($ok) { Write-Host "  [PASS] $name $detail" } else { Write-Host "  [FAIL] $name $detail" -ForegroundColor Red; $script:fail++ }
 }
 function Ctl { (& $ctl @args 2>&1) -join "`n" }
-function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
+function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null } }
 function Wait-Anim { Start-Sleep -Milliseconds 150; $t0 = Get-Date; while ([T8]::FindWindow('hyprwin.ghost', [NullString]::Value) -ne [IntPtr]::Zero -and ((Get-Date) - $t0).TotalMilliseconds -lt 3000) { Start-Sleep -Milliseconds 20 }; Start-Sleep -Milliseconds 300 }
 function Bottom($h) { $r = New-Object TR; [void][T8]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); $r.B }
 
@@ -113,7 +113,7 @@ try {
     Check 'hidden after resume' (-not [T8]::IsWindowVisible($tray))
 
     Write-Host "`n== crash: the guard restores the taskbar"
-    Get-Process hyprwin -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null }
+    Get-Process hyprwin -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 2500
     Check 'taskbar visible after the daemon was killed' ([T8]::IsWindowVisible($tray))
 }

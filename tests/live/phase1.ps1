@@ -68,7 +68,7 @@ function Settle {
 }
 
 # Clean slate.
-Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null }
+Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
 Start-Sleep -Milliseconds 300
 
 $targets = @()
@@ -218,13 +218,13 @@ try {
     Check 'guard is running' ($null -ne $guard)
     Ctl dispatch workspace 2 | Out-Null; Settle
     Check 'windows hidden before crash' (($h | Where-Object { (Cloaked $_) -ne 0 }).Count -eq 3)
-    Get-CimInstance Win32_Process -Filter "ProcessId=$($daemon.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null
+    Get-CimInstance Win32_Process -Filter "ProcessId=$($daemon.Id)" | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Milliseconds 1500
     Check 'after daemon is killed, guard restored every window' (($h | Where-Object { (Cloaked $_) -eq 0 }).Count -eq 3) "cloaked=$(($h | ForEach-Object { Cloaked $_ }) -join ',')"
     Check 'guard exits after restoring' ($null -eq (Get-Process hyprwin-guard -ErrorAction SilentlyContinue))
 }
 finally {
-    Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null }
+    Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 500
     # Belt and braces: replay any ledger left behind.
     $targets | ForEach-Object { if (-not $_.HasExited) { $_.Kill() } }
