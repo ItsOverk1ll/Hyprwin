@@ -3,8 +3,9 @@
 //! step. Deterministic (fixed seeds), so a failure is reproducible: the panic
 //! message names the seed and step, and `STRESS_SEED=<seed>` reruns just it.
 
+use hyprwin_layout::master::{NewStatus, Orientation};
 use hyprwin_layout::wm::{MonitorSpec, NewWindow};
-use hyprwin_layout::{Dir, Effect, FullscreenMode, LayoutKind, Rect, WinId, Wm, WmConfig, WsSel};
+use hyprwin_layout::{Dir, Effect, FullscreenMode, Gaps, LayoutKind, Rect, WinId, Wm, WmConfig, WsSel};
 
 struct Rng(u64);
 
@@ -361,10 +362,36 @@ fn step(wm: &mut Wm, rng: &mut Rng, next_id: &mut WinId) -> String {
     }
 }
 
+fn steps() -> usize {
+    std::env::var("STRESS_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(400)
+}
+
 fn run(seed: u64, steps: usize) {
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
-    let cfg = WmConfig { layout: if rng.chance(30) { LayoutKind::Master } else { LayoutKind::Dwindle }, ..Default::default() };
-    let mons = monitor_set(&mut rng);
+    let mut cfg = WmConfig { layout: if rng.chance(30) { LayoutKind::Master } else { LayoutKind::Dwindle }, ..Default::default() };
+    // Every few seeds, a non-default config.
+    if rng.chance(50) {
+        cfg.gaps_in = Gaps::all(rng.range(0, 30));
+        cfg.gaps_out = Gaps::all(rng.range(0, 60));
+        cfg.border_reserve = rng.range(0, 8);
+        cfg.workspace_back_and_forth = rng.chance(50);
+        cfg.on_focus_under_fullscreen = rng.below(3) as u8;
+        cfg.dwindle.preserve_split = rng.chance(50);
+        cfg.dwindle.force_split = rng.below(3) as u8;
+        cfg.dwindle.use_active_for_splits = rng.chance(50);
+        cfg.dwindle.default_split_ratio = 0.2 + rng.below(16) as f64 / 10.0;
+        cfg.dwindle.special_scale_factor = 0.5 + rng.below(6) as f64 / 10.0;
+        cfg.master.mfact = 0.1 + rng.below(9) as f64 / 10.0;
+        cfg.master.new_on_top = rng.chance(50);
+        cfg.master.new_status = [NewStatus::Master, NewStatus::Slave, NewStatus::Inherit][rng.below(3) as usize];
+        cfg.master.orientation = [Orientation::Left, Orientation::Right, Orientation::Top, Orientation::Bottom, Orientation::Center][rng.below(5) as usize];
+    }
+    let mut mons = monitor_set(&mut rng);
+    if rng.chance(30) {
+        for m in &mut mons {
+            m.scale = [1.25, 1.5, 1.75, 2.0][rng.below(4) as usize];
+        }
+    }
     let mut wm = Wm::new(cfg, mons);
     let mut next_id: WinId = 0x1000;
     let mut log: Vec<String> = Vec::new();
@@ -394,11 +421,11 @@ fn run(seed: u64, steps: usize) {
 #[test]
 fn random_operations_keep_the_model_consistent() {
     if let Some(seed) = std::env::var("STRESS_SEED").ok().and_then(|s| s.parse().ok()) {
-        run(seed, 400);
+        run(seed, steps());
         return;
     }
     let seeds: u64 = std::env::var("STRESS_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
     for seed in 0..seeds {
-        run(seed, 400);
+        run(seed, steps());
     }
 }

@@ -55,7 +55,15 @@ impl Gaps {
 }
 
 pub fn shrink(r: Rect, g: Gaps) -> Rect {
-    Rect::new(r.x + g.left, r.y + g.top, (r.w - g.left - g.right).max(1), (r.h - g.top - g.bottom).max(1))
+    // Insets wider than the box leave a 1 px sliver at its centre: still
+    // inside the box, never pushed onto a neighbour or off the monitor.
+    let axis = |pos: i32, len: i32, a: i32, b: i32| {
+        let inner = len - a - b;
+        if inner >= 1 { (pos + a, inner) } else { (pos + (len - 1).max(0) / 2, 1) }
+    };
+    let (x, w) = axis(r.x, r.w, g.left, g.right);
+    let (y, h) = axis(r.y, r.h, g.top, g.bottom);
+    Rect::new(x, y, w, h)
 }
 
 pub fn contains_point(r: Rect, x: f64, y: f64) -> bool {
