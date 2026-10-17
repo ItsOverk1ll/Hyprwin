@@ -6,6 +6,7 @@
 #![windows_subsystem = "windows"]
 
 mod daemon;
+mod keybinds_ui;
 mod setup;
 mod setup_ui;
 mod ui;
@@ -59,6 +60,17 @@ fn main() -> eframe::Result {
             Err(_) => 1,
         };
         std::process::exit(code);
+    }
+    // Keybind changes from scripts, the same way the Keybinds tab makes them:
+    //   --bind "SUPER, N, exec, notepad"   --unbind "SUPER, Q"
+    if let Some((flag, spec)) = args.iter().position(|a| a == "--bind" || a == "--unbind").and_then(|i| args.get(i + 1).map(|s| (args[i].clone(), s.clone()))) {
+        std::process::exit(match keybinds_ui::apply_cli(flag == "--bind", &spec) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        });
     }
     // Setup mode: run as hyprwin-setup.exe, or with --setup / --install / --uninstall.
     let exe_name = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())).unwrap_or_default();

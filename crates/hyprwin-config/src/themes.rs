@@ -141,7 +141,7 @@ pub fn managed_block(theme: Option<&Path>) -> String {
         Some(p) => format!("source = {}", p.display()),
         None => "# (no theme selected)".to_string(),
     };
-    format!("{BLOCK_START}\n{theme_line}\nsource = {}\n{BLOCK_END}\n", paths::settings_conf().display())
+    format!("{BLOCK_START}\n{theme_line}\nsource = {}\nsource = {}\n{BLOCK_END}\n", paths::settings_conf().display(), paths::binds_conf().display())
 }
 
 /// Path of the theme currently selected in the managed block, if any.
@@ -174,8 +174,17 @@ pub fn ensure_managed_block(config: &Path) -> std::io::Result<()> {
     if !paths::settings_conf().exists() {
         std::fs::write(paths::settings_conf(), "# Values chosen in hyprwin's Settings window. Edited by the app.\n")?;
     }
+    if !paths::binds_conf().exists() {
+        std::fs::write(paths::binds_conf(), crate::binds_file::BindsFile::default().render())?;
+    }
     let text = std::fs::read_to_string(config).unwrap_or_default();
     if text.contains(BLOCK_START) {
+        // Blocks written before binds.conf existed are brought up to date,
+        // keeping the selected theme.
+        if !text.contains(&paths::binds_conf().display().to_string()) {
+            let theme = active_theme(&text);
+            std::fs::write(config, with_managed_block(&text, theme.as_deref()))?;
+        }
         return Ok(());
     }
     std::fs::write(config, with_managed_block(&text, None))

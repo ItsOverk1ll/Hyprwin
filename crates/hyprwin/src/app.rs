@@ -1655,16 +1655,18 @@ impl App {
             .iter()
             .map(|b| {
                 json!({
-                    "modmask": b.mods.0, "mods": b.mods.to_string(), "key": format!("{:?}", b.key),
-                    "submap": b.submap.clone().unwrap_or_default(), "description": b.description,
-                    "dispatcher": format!("{:?}", b.cmd), "action": b.cmd.describe(), "repeat": b.flags.repeat, "release": b.flags.release, "mouse": b.flags.mouse,
+                    // Same fields as `hyprctl binds -j`, plus a plain-English "action".
+                    "modmask": b.mods.0, "mods": b.mods.to_string(), "key": b.key.name(),
+                    "submap": b.submap.clone().unwrap_or_default(), "description": b.description, "has_description": !b.description.is_empty(),
+                    "dispatcher": b.dispatcher, "arg": b.arg, "action": b.cmd.describe(),
+                    "locked": b.flags.locked, "repeat": b.flags.repeat, "release": b.flags.release, "mouse": b.flags.mouse, "non_consuming": b.flags.non_consuming,
                 })
             })
             .collect();
         if json {
             return serde_json::to_string_pretty(&list).unwrap_or_default();
         }
-        list.iter().map(|b| format!("bind: {} {} -> {}\n", b["mods"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or(""), b["dispatcher"].as_str().unwrap_or(""))).collect()
+        list.iter().map(|b| format!("bind: {} {} -> {} {}\n", b["mods"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or(""), b["dispatcher"].as_str().unwrap_or(""), b["arg"].as_str().unwrap_or(""))).collect()
     }
 
     /// Everything needed to write a rule or file a bug.

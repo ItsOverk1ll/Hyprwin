@@ -5,6 +5,7 @@
 //! from 0.48–0.54). Unsupported or Wayland-only keys never fail the load. They
 //! become warnings, so users can paste a real config and see what was ignored.
 
+pub mod binds_file;
 pub mod dispatch;
 pub mod keys;
 pub mod model;

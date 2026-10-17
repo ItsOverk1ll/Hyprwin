@@ -20,6 +20,11 @@ pub fn settings_conf() -> PathBuf {
     app_dir().join("settings.conf")
 }
 
+/// Keybind changes made in the Settings window. Sourced after settings.conf.
+pub fn binds_conf() -> PathBuf {
+    app_dir().join("binds.conf")
+}
+
 /// Config locations in priority order (Hyprland's path first).
 pub fn config_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();

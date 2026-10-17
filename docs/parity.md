@@ -155,6 +155,7 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 
 | Feature | Status | Notes |
 |---|---|---|
+| Keybind editor (Settings › Keybinds) and `hyprwin-settings --bind/--unbind` | ✅ | Change, add and remove binds with plain-English actions or any dispatcher. Written to `binds.conf` (sourced last) as Hyprland `unbind`/`bind` lines; hyprland.conf is never edited. Rebinding taken keys replaces the old action. Binds in submaps are shown but not editable there. |
 | tray icon: pause/resume, App Groups, Themes, Settings, edit config, open log, exit | ✅ | Native Win32 in the daemon (no extra process). Re-added if Explorer restarts. |
 | Settings window | ✅ | `hyprwin-settings.exe` (Rust/egui) runs only while open. Writes `settings.conf`, sourced last. |
 | Themes | ✅ | Shareable hyprlang `.conf` files with `# name/author/description` headers. 6 built in, "save current look as theme", `--apply-theme`. |
@@ -168,3 +169,5 @@ The reference is Hyprland 0.54's hyprlang config. 0.55+ Lua config is ⏳ (see A
 | status bar (Waybar-like) | ⏳ P5 | Our own native Rust bar on the event pipe. |
 | launcher | 🟡 | `$menu` opens the Apps folder by default; bind any launcher with `exec`. |
 | groups / tabbed | ⏳ P5 | |
+
+Note: `unbind` follows Hyprland: it removes binds made before it, so `unbind` + `bind` re-binds a key. `hyprwinctl -j binds` returns hyprctl's fields (`key`, `dispatcher`, `arg`, flags) plus a plain-English `action`.

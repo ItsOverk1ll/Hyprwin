@@ -94,6 +94,9 @@ pub struct Bind {
     pub submap: Option<String>,
     pub description: String,
     pub source: String,
+    /// The dispatcher and its argument as written (for editing and display).
+    pub dispatcher: String,
+    pub arg: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -344,7 +347,11 @@ impl Config {
             "submap" => *submap = if v.trim() == "reset" { None } else { Some(v.trim().to_string()) },
             "unbind" => {
                 let (m, k) = v.split_once(',').ok_or("unbind expects MODS, key")?;
-                self.unbinds.push((Mods::parse(m)?, Key::parse(k)?));
+                let (m, k) = (Mods::parse(m)?, Key::parse(k)?);
+                // As in Hyprland: removes what is bound so far; later binds of
+                // the same keys stay (that is how a key is re-bound).
+                self.binds.retain(|b| !(b.mods == m && b.key == k));
+                self.unbinds.push((m, k));
             }
             "monitor" => {
                 let p: Vec<&str> = v.split(',').map(str::trim).collect();
@@ -439,13 +446,13 @@ impl Config {
         if key.is_mouse() && matches!(key, Key::MouseLeft | Key::MouseRight) && mods == Mods::NONE && !flags.mouse {
             return Err("refusing to bind a bare mouse button (it would make the mouse unusable)".into());
         }
-        self.binds.push(Bind { mods, key, flags, cmd, submap, description, source: src.to_string() });
+        self.binds.push(Bind { mods, key, flags, cmd, submap, description, source: src.to_string(), dispatcher: disp.to_string(), arg: arg.to_string() });
         Ok(())
     }
 
     /// Final bind list after `unbind`s.
     pub fn effective_binds(&self) -> Vec<Bind> {
-        self.binds.iter().filter(|b| !self.unbinds.contains(&(b.mods, b.key))).cloned().collect()
+        self.binds.clone()
     }
 }
 
@@ -596,8 +603,9 @@ monitor=,preferred,auto,auto
 
     #[test]
     fn bind_with_description_and_unbind() {
-        let c = Config::load_str("bindd = SUPER, Q, Open terminal, exec, wt\nunbind = SUPER, Q\n");
+        let c = Config::load_str("bindd = SUPER, Q, Open terminal, exec, wt\n");
         assert_eq!(c.binds[0].description, "Open terminal");
+        let c = Config::load_str("bindd = SUPER, Q, Open terminal, exec, wt\nunbind = SUPER, Q\n");
         assert!(c.effective_binds().is_empty());
     }
 
@@ -659,5 +667,13 @@ hyprwin {
 ");
         assert_eq!(c.anim("windowsMove").unwrap().duration_ms, 200.0);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+    }
+
+    #[test]
+    fn unbind_then_rebind_keeps_the_new_bind() {
+        let c = Config::load_str("bind = SUPER, Q, exec, wt\nunbind = SUPER, Q\nbind = SUPER, Q, exec, notepad\n");
+        let b = c.effective_binds();
+        assert_eq!(b.len(), 1);
+        assert_eq!((b[0].dispatcher.as_str(), b[0].arg.as_str()), ("exec", "notepad"));
     }
 }

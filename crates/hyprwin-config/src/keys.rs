@@ -59,6 +59,48 @@ pub enum Key {
 }
 
 impl Key {
+    /// The key as written in hyprland.conf (round-trips through [`parse`](Self::parse)).
+    pub fn name(self) -> String {
+        match self {
+            Key::MouseLeft => "mouse:272".into(),
+            Key::MouseRight => "mouse:273".into(),
+            Key::MouseMiddle => "mouse:274".into(),
+            Key::MouseX1 => "mouse:275".into(),
+            Key::MouseX2 => "mouse:276".into(),
+            Key::WheelUp => "mouse_up".into(),
+            Key::WheelDown => "mouse_down".into(),
+            Key::Scan(n) => format!("code:{}", n + 8),
+            Key::Vk(vk) => match vk {
+                0x30..=0x39 | 0x41..=0x5A => (vk as u8 as char).to_string(),
+                0x70..=0x87 => format!("F{}", vk - 0x6F),
+                0x60..=0x69 => format!("KP_{}", vk - 0x60),
+                _ => NAMED.iter().find(|(_, v)| *v == vk).map(|(n, _)| n.to_string()).unwrap_or_else(|| format!("code:{vk}")),
+            },
+        }
+    }
+
+    /// Short, friendly label for the Settings window.
+    pub fn label(self) -> String {
+        match self {
+            Key::MouseLeft => "Left mouse".into(),
+            Key::MouseRight => "Right mouse".into(),
+            Key::MouseMiddle => "Middle mouse".into(),
+            Key::MouseX1 => "Mouse back".into(),
+            Key::MouseX2 => "Mouse forward".into(),
+            Key::WheelUp => "Scroll up".into(),
+            Key::WheelDown => "Scroll down".into(),
+            Key::Vk(0x25) => "←".into(),
+            Key::Vk(0x26) => "↑".into(),
+            Key::Vk(0x27) => "→".into(),
+            Key::Vk(0x28) => "↓".into(),
+            Key::Vk(0x0D) => "Enter".into(),
+            Key::Vk(0x20) => "Space".into(),
+            Key::Vk(0x1B) => "Esc".into(),
+            Key::Vk(0x09) => "Tab".into(),
+            other => other.name(),
+        }
+    }
+
     pub fn is_mouse(self) -> bool {
         !matches!(self, Key::Vk(_) | Key::Scan(_))
     }
@@ -188,5 +230,61 @@ mod tests {
         assert_eq!(Key::parse("code:10").unwrap(), Key::Scan(2));
         assert_eq!(Key::parse("XF86AudioRaiseVolume").unwrap(), Key::Vk(0xAF));
         assert!(Key::parse("XF86MonBrightnessUp").is_err());
+    }
+}
+
+/// Canonical hyprland.conf names of named keys (used to write keys back).
+const NAMED: &[(&str, u16)] = &[
+    ("Return", 0x0D),
+    ("Tab", 0x09),
+    ("Escape", 0x1B),
+    ("space", 0x20),
+    ("BackSpace", 0x08),
+    ("Delete", 0x2E),
+    ("Insert", 0x2D),
+    ("Home", 0x24),
+    ("End", 0x23),
+    ("Prior", 0x21),
+    ("Next", 0x22),
+    ("left", 0x25),
+    ("up", 0x26),
+    ("right", 0x27),
+    ("down", 0x28),
+    ("Print", 0x2C),
+    ("Pause", 0x13),
+    ("Scroll_Lock", 0x91),
+    ("Caps_Lock", 0x14),
+    ("Menu", 0x5D),
+    ("minus", 0xBD),
+    ("equal", 0xBB),
+    ("comma", 0xBC),
+    ("period", 0xBE),
+    ("slash", 0xBF),
+    ("semicolon", 0xBA),
+    ("apostrophe", 0xDE),
+    ("grave", 0xC0),
+    ("bracketleft", 0xDB),
+    ("bracketright", 0xDD),
+    ("backslash", 0xDC),
+    ("KP_Add", 0x6B),
+    ("KP_Subtract", 0x6D),
+    ("KP_Multiply", 0x6A),
+    ("KP_Divide", 0x6F),
+    ("KP_Decimal", 0x6E),
+];
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn every_named_key_round_trips() {
+        for (name, vk) in NAMED {
+            assert_eq!(Key::parse(name).unwrap(), Key::Vk(*vk), "{name}");
+            assert_eq!(Key::Vk(*vk).name(), *name);
+        }
+        for k in ["Q", "7", "F5", "F12", "KP_3", "mouse:272", "mouse_down", "code:10"] {
+            assert_eq!(Key::parse(&Key::parse(k).unwrap().name()).unwrap(), Key::parse(k).unwrap(), "{k}");
+        }
     }
 }

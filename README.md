@@ -32,7 +32,7 @@ To update, run the newer `hyprwin-setup.exe` (Settings › About › Check for u
 | Super + Alt + B | hide / show the taskbar |
 | Super + left-drag / right-drag | move / resize with the mouse |
 
-The full list is in the Settings window (Keybinds tab).
+See and change every keybind in the Settings window (Keybinds tab); no config editing needed.
 
 ## Build from source
 

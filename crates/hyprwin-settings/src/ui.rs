@@ -6,7 +6,7 @@ use hyprwin_config::settings::SettingsFile;
 use hyprwin_config::themes::{self, ThemeInfo};
 use hyprwin_config::{Config, paths};
 
-use crate::daemon::{self, BindRow, Status};
+use crate::daemon::{self, Status};
 
 pub const TITLE: &str = "hyprwin";
 
@@ -152,15 +152,14 @@ pub struct SettingsApp {
     groups: Vec<Group>,
     new_group: String,
     focus_new_group: bool,
-    binds: Vec<BindRow>,
-    binds_loaded: bool,
+    keybinds: crate::keybinds_ui::KeybindEditor,
     start_with_windows: bool,
     toast: Option<(String, Instant, bool)>,
     update_rx: Option<std::sync::mpsc::Receiver<crate::update::Outcome>>,
     update: Option<crate::update::Outcome>,
 }
 
-fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     paths::active_config()
 }
 
@@ -220,8 +219,7 @@ impl SettingsApp {
             groups: load_groups(),
             new_group: String::new(),
             focus_new_group: save,
-            binds: Vec::new(),
-            binds_loaded: false,
+            keybinds: Default::default(),
             start_with_windows: starts_with_windows(),
             toast: None,
             update_rx: None,
@@ -619,35 +617,11 @@ impl SettingsApp {
     // ------------------------------------------------------------------ keybinds / about
 
     fn keybinds_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Keybinds");
-        ui.label(RichText::new("Read-only for now: keybinds live in your config file, using Hyprland's syntax.").weak());
-        ui.horizontal(|ui| {
-            if ui.button("Edit config file").clicked() {
-                let _ = std::process::Command::new("notepad.exe").arg(config_path()).spawn();
-            }
-            if ui.button("Refresh").clicked() {
-                self.binds_loaded = false;
-            }
-        });
-        if !self.binds_loaded {
-            self.binds = daemon::binds();
-            self.binds_loaded = true;
+        let mut toast: Option<(String, bool)> = None;
+        self.keybinds.show(ui, &mut |m, e| toast = Some((m, e)));
+        if let Some((m, e)) = toast {
+            self.notify(m, e);
         }
-        if self.binds.is_empty() {
-            ui.label("Start hyprwin to see your keybinds.");
-            return;
-        }
-        ui.add_space(6.0);
-        egui::Grid::new("binds").striped(true).num_columns(2).spacing(Vec2::new(24.0, 6.0)).show(ui, |ui| {
-            ui.label(RichText::new("Keys").strong());
-            ui.label(RichText::new("Does").strong());
-            ui.end_row();
-            for b in &self.binds {
-                ui.label(RichText::new(&b.keys).monospace());
-                ui.label(if b.description.is_empty() { b.action.clone() } else { b.description.clone() });
-                ui.end_row();
-            }
-        });
     }
 
     fn about_tab(&mut self, ui: &mut egui::Ui) {
