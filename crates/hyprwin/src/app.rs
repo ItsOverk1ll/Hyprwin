@@ -1239,19 +1239,25 @@ impl App {
             return self.wm.focus;
         }
         let (k, v) = sel.split_once(':').unwrap_or((sel, ""));
-        let re = || regex_lite(v);
+        // Compiled once per lookup, not once per window.
+        let re = match k {
+            "class" | "title" | "initialclass" | "initialtitle" => regex_lite(v),
+            "address" | "pid" | "floating" | "tiled" => None,
+            _ => regex_lite(sel),
+        };
+        let is = |s: &str| re.as_ref().is_some_and(|r| r.is_match(s));
         self.wm.windows.keys().copied().find(|id| {
             let m = self.meta.get(id);
             match k {
                 "address" => u64::from_str_radix(v.trim_start_matches("0x"), 16).ok() == Some(*id),
                 "pid" => m.is_some_and(|m| v.parse() == Ok(m.pid)),
-                "class" => m.is_some_and(|m| re().is_some_and(|r| r.is_match(&m.class))),
-                "title" => m.is_some_and(|m| re().is_some_and(|r| r.is_match(&m.title))),
-                "initialclass" => self.initial.get(id).is_some_and(|i| re().is_some_and(|r| r.is_match(&i.0))),
-                "initialtitle" => self.initial.get(id).is_some_and(|i| re().is_some_and(|r| r.is_match(&i.1))),
+                "class" => m.is_some_and(|m| is(&m.class)),
+                "title" => m.is_some_and(|m| is(&m.title)),
+                "initialclass" => self.initial.get(id).is_some_and(|i| is(&i.0)),
+                "initialtitle" => self.initial.get(id).is_some_and(|i| is(&i.1)),
                 "floating" => self.wm.windows[id].floating,
                 "tiled" => !self.wm.windows[id].floating,
-                _ => m.is_some_and(|m| re_or(sel).is_some_and(|r| r.is_match(&m.class))),
+                _ => m.is_some_and(|m| is(&m.class)),
             }
         })
     }
@@ -1411,7 +1417,13 @@ impl App {
         let fx = self.wm.sync();
         self.apply(fx);
         self.emit("configreloaded", "");
+        // `addreserved` may have changed; apply_taskbar refreshes only when
+        // the taskbar itself changes.
+        let taskbar_changes = (self.cfg.hide_taskbar && !self.paused) != crate::taskbar::is_hidden();
         self.apply_taskbar();
+        if !taskbar_changes {
+            self.refresh_monitors();
+        }
     }
 
     // ------------------------------------------------------------------ taskbar
@@ -1777,10 +1789,6 @@ fn near(a: Rect, b: Rect) -> bool {
 
 fn regex_lite(v: &str) -> Option<regex::Regex> {
     regex::Regex::new(&format!("(?i){v}")).ok()
-}
-
-fn re_or(v: &str) -> Option<regex::Regex> {
-    regex_lite(v)
 }
 
 pub fn cursor_pos() -> (i32, i32) {

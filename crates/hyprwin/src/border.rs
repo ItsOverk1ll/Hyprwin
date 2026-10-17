@@ -238,13 +238,17 @@ impl ActiveBorder {
         }
         let key = target.0 as isize;
         let same = self.shown.as_ref().is_some_and(|(t, f, s)| *t == key && *f == frame && *s == st);
+        // The ring's pixels depend only on the frame's size, not where it is:
+        // a dragged window, or focus moving between equal tiles, only moves
+        // the strips (rendering them is per-pixel work).
+        let same_pixels = self.shown.as_ref().is_some_and(|(_, f, s)| f.w == frame.w && f.h == frame.h && *s == st);
         let parts = strips(frame, &st);
-        if !same {
+        if !same_pixels {
             for (h, r) in self.wins.iter().zip(parts.iter()) {
                 draw(*h, *r, frame, &st);
             }
         }
-        self.place_in_z(target, &parts);
+        self.place_in_z(target, &parts, same_pixels && !same);
         if !same {
             crate::debug!("border: around {:#x} at {:?}", key, frame);
         }
@@ -252,8 +256,8 @@ impl ActiveBorder {
     }
 
     /// Directly above the target: anything above it (a floating window)
-    /// still covers the border.
-    fn place_in_z(&self, target: HWND, parts: &[Rect; 4]) {
+    /// still covers the border. `reposition` also moves the strips to `parts`.
+    fn place_in_z(&self, target: HWND, parts: &[Rect; 4], reposition: bool) {
         let topmost = |h: HWND| window::ex_style(h) & WS_EX_TOPMOST.0 != 0;
         let mut above = unsafe { GetWindow(target, GW_HWNDPREV) }.ok();
         while let Some(a) = above {
@@ -269,8 +273,9 @@ impl ActiveBorder {
         };
         unsafe {
             for (h, r) in self.wins.iter().zip(parts.iter()) {
-                let flags = SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOMOVE | if r.w > 0 && r.h > 0 { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
-                let _ = SetWindowPos(*h, Some(after), 0, 0, 0, 0, flags);
+                let mv = if reposition { SET_WINDOW_POS_FLAGS(0) } else { SWP_NOMOVE };
+                let flags = SWP_NOACTIVATE | SWP_NOSIZE | mv | if r.w > 0 && r.h > 0 { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
+                let _ = SetWindowPos(*h, Some(after), r.x, r.y, 0, 0, flags);
                 if topmost(*h) {
                     let _ = SetWindowPos(*h, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOMOVE);
                 }
@@ -333,6 +338,21 @@ mod tests {
         let right = px[(top.w - 1) as usize];
         assert!(left & 0xFF > 0xF0 && (left >> 16) & 0xFF < 0x10, "left is blue: {left:08x}");
         assert!((right >> 16) & 0xFF > 0xF0 && right & 0xFF < 0x10, "right is red: {right:08x}");
+    }
+
+    #[test]
+    fn pixels_do_not_depend_on_position() {
+        // `show` only moves the strips when the frame moves without resizing.
+        let s = st(5, 12, vec![0xFF_0000FF, 0xEE_FF8800, 0xFF_00FF00], 37.0);
+        let a = Rect::new(10, 20, 640, 480);
+        let b = Rect::new(-1913, 777, 640, 480);
+        for (sa, sb) in strips(a, &s).into_iter().zip(strips(b, &s)) {
+            let mut pa = vec![0u32; (sa.w * sa.h) as usize];
+            let mut pb = vec![0u32; (sb.w * sb.h) as usize];
+            render(sa, a, &s, &mut pa);
+            render(sb, b, &s, &mut pb);
+            assert_eq!(pa, pb);
+        }
     }
 
     #[test]
