@@ -38,6 +38,8 @@ and `restart.ps1`.
 | 13 | **App Groups:** saving a workspace that had a minimized tiled window scrambled the arrangement when the group was opened. | groups | Tile A, B and C, minimize B, save the group, close everything, open the group. A and C come back in their own places. |
 | 14 | Reloading the config did not apply a changed `addreserved` until a monitor change. | reload | Change `addreserved` and save. Tiles move at once. |
 | 15 | The keybind editor showed `movefocus, left` (valid Hyprland) as a custom action instead of "Move focus left". | config | Put `bind = SUPER, A, movefocus, left` in the config and open Settings > Keybinds. It shows as Move focus. |
+| 16 | `hyprwinctl events \| grep -m1 …` never exited (writes to a closed pipe were ignored), and `-j` was stripped even from dispatch arguments. | hyprwinctl | `hyprwinctl events \| Select-Object -First 1` returns after one event. `hyprwinctl clients -j` still gives JSON. |
+| 17 | (Defensive) The animation curve solver could in theory step off the curve for unusual `bezier =` values. | anim | Covered by a 20,000-curve property test. |
 
 ## Speed
 
