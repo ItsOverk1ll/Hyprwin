@@ -103,6 +103,15 @@ try {
     $s.Connect(2000); $s.Write([BitConverter]::GetBytes([uint32]$req.Length), 0, 4); $s.Write($req, 0, $req.Length); $s.Flush()
     $reply = (New-Object System.IO.StreamReader($s)).ReadToEnd(); $s.Dispose()
     Check 'a 200 KB request gets an answer' ($reply.Length -gt 0) $reply
+    # ~900 KB of nested batch prefixes: used to recurse until the stack overflowed.
+    $bomb = [Text.Encoding]::UTF8.GetBytes('[[BATCH]]' * 100000 + 'version')
+    try {
+        $s = New-Object System.IO.Pipes.NamedPipeClientStream('.', "hyprwin-$pipeTag", [System.IO.Pipes.PipeDirection]::InOut)
+        $s.Connect(2000); $s.Write([BitConverter]::GetBytes([uint32]$bomb.Length), 0, 4); $s.Write($bomb, 0, $bomb.Length); $s.Flush()
+        [void](New-Object System.IO.StreamReader($s)).ReadToEnd(); $s.Dispose()
+    } catch { Write-Host "    (bomb client error: $_)" }
+    Start-Sleep -Milliseconds 500
+    Check 'daemon survives a nested-batch bomb' (Alive $d)
     Check 'daemon alive after malformed requests' (Alive $d)
     Check 'still answering after malformed requests' ((Ctl version) -match 'hyprwin')
 

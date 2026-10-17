@@ -28,11 +28,18 @@ pub struct Parsed {
 /// Keyword sections that produce one block entry instead of nested keys.
 const BLOCK_KEYWORDS: &[&str] = &["windowrule", "layerrule", "workspace"];
 
+/// Longest value a `$variable` may expand to: `$b = $a$a$a…` chains grow
+/// tenfold per line and would exhaust memory within a dozen lines.
+const MAX_VALUE: usize = 64 * 1024;
+/// Most files one config may pull in through `source` (a file sourcing
+/// itself twice would otherwise be read 2^16 times).
+const MAX_FILES: usize = 256;
+
 pub fn parse_file(path: &Path) -> Parsed {
     let mut p = Parsed::default();
     let mut vars: Vec<(String, String)> = Vec::new();
     match std::fs::read_to_string(path) {
-        Ok(text) => parse_into(&text, path, &mut vars, &mut p, 0),
+        Ok(text) => parse_into(&text, path, &mut vars, &mut p, &mut Vec::new()),
         Err(e) => p.warnings.push(format!("{}: cannot read: {e}", path.display())),
     }
     p
@@ -41,7 +48,7 @@ pub fn parse_file(path: &Path) -> Parsed {
 pub fn parse_str(text: &str, name: &str) -> Parsed {
     let mut p = Parsed::default();
     let mut vars = Vec::new();
-    parse_into(text, Path::new(name), &mut vars, &mut p, 0);
+    parse_into(text, Path::new(name), &mut vars, &mut p, &mut Vec::new());
     p
 }
 
@@ -89,12 +96,14 @@ pub fn expand_home(s: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &mut Parsed, depth: usize) {
-    if depth > 16 {
+/// `chain` is the stack of files currently being read (for cycle detection).
+fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &mut Parsed, chain: &mut Vec<PathBuf>) {
+    if chain.len() > 16 {
         out.warnings.push(format!("{}: source nesting too deep", file.display()));
         return;
     }
     out.files.push(file.to_path_buf());
+    chain.push(file.to_path_buf());
     let fname = file.display().to_string();
     let mut sections: Vec<String> = Vec::new();
     let mut block: Option<(String, Vec<(String, String)>, usize)> = None;
@@ -130,7 +139,15 @@ fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &m
             continue;
         };
         let k = k.trim();
-        let v = expand_vars(v.trim(), vars);
+        let mut v = expand_vars(v.trim(), vars);
+        if v.len() > MAX_VALUE {
+            let mut cut = MAX_VALUE;
+            while !v.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            v.truncate(cut);
+            out.warnings.push(format!("{fname}:{lineno}: value longer than {MAX_VALUE} bytes after expanding variables; truncated"));
+        }
         if let Some(name) = k.strip_prefix('$') {
             vars.retain(|(n, _)| n != name);
             vars.push((name.to_string(), v));
@@ -152,8 +169,16 @@ fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &m
         }
         if key == "source" {
             for path in glob_paths(&expand_home(&v), file) {
+                if chain.contains(&path) {
+                    out.warnings.push(format!("{fname}:{lineno}: source {}: already being read (a source loop); skipped", path.display()));
+                    continue;
+                }
+                if out.files.len() >= MAX_FILES {
+                    out.warnings.push(format!("{fname}:{lineno}: source {}: more than {MAX_FILES} files sourced; skipped", path.display()));
+                    continue;
+                }
                 match std::fs::read_to_string(&path) {
-                    Ok(t) => parse_into(&t, &path, vars, out, depth + 1),
+                    Ok(t) => parse_into(&t, &path, vars, out, chain),
                     Err(e) => out.warnings.push(format!("{fname}:{lineno}: source {}: {e}", path.display())),
                 }
             }
@@ -164,6 +189,7 @@ fn parse_into(text: &str, file: &Path, vars: &mut Vec<(String, String)>, out: &m
     if !sections.is_empty() || block.is_some() {
         out.warnings.push(format!("{fname}: unclosed '{{' at end of file"));
     }
+    chain.pop();
 }
 
 /// Resolves `source` paths: relative to the including file, `*` wildcard in the
@@ -227,5 +253,37 @@ mod tests {
         let p = parse_str("general {\n gaps_in = 1\n", "t");
         assert_eq!(p.entries.len(), 1);
         assert!(!p.warnings.is_empty());
+    }
+
+    #[test]
+    fn variable_bombs_are_capped() {
+        let mut text = String::from("$a = xxxxxxxxxx\n");
+        let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+        for w in names.windows(2) {
+            text += &format!("${} = {}\n", w[1], format!("${}", w[0]).repeat(10));
+        }
+        text += "general:gaps_in = $l\n";
+        let t = std::time::Instant::now();
+        let p = parse_str(&text, "bomb.conf");
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "took {:?}", t.elapsed());
+        assert!(p.entries.iter().all(|e| e.value.len() <= MAX_VALUE));
+        assert!(p.warnings.iter().any(|w| w.contains("truncated")));
+    }
+
+    #[test]
+    fn source_loops_terminate_quickly() {
+        let dir = std::env::temp_dir().join(format!("hyprwin-source-loop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("a.conf");
+        let b = dir.join("b.conf");
+        std::fs::write(&a, "source = a.conf\nsource = a.conf\nsource = b.conf\ngeneral:gaps_in = 1\n").unwrap();
+        std::fs::write(&b, "source = a.conf\nsource = b.conf\nsource = *.conf\ngeneral:gaps_out = 2\n").unwrap();
+        let t = std::time::Instant::now();
+        let p = parse_file(&a);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "took {:?}", t.elapsed());
+        assert!(p.files.len() <= MAX_FILES);
+        assert!(p.warnings.iter().any(|w| w.contains("source loop")));
+        assert!(p.entries.iter().any(|e| e.key == "general:gaps_out"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

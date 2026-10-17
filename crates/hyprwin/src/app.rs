@@ -1509,7 +1509,16 @@ impl App {
 
     pub fn handle_request(&mut self, req: &str) -> String {
         if let Some(batch) = req.strip_prefix(hyprwin_ipc::BATCH_PREFIX) {
-            return batch.split(';').map(|r| self.handle_request(r.trim())).collect::<Vec<_>>().join("\n");
+            // Batches do not nest: a request made of thousands of nested
+            // batch prefixes recursed until the stack overflowed.
+            return batch.split(';').map(|r| self.handle_one(r.trim())).collect::<Vec<_>>().join("\n");
+        }
+        self.handle_one(req)
+    }
+
+    fn handle_one(&mut self, req: &str) -> String {
+        if req.starts_with(hyprwin_ipc::BATCH_PREFIX) {
+            return "error: batches cannot be nested".into();
         }
         let (json, req) = match req.strip_prefix("j/") {
             Some(r) => (true, r),
