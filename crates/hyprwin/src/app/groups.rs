@@ -19,6 +19,8 @@ use crate::{info, warn};
 
 /// How long to wait for launched apps' windows before arranging what arrived.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(45);
+/// Most apps one group may launch.
+const MAX_GROUP_APPS: usize = 32;
 
 #[derive(Clone, Debug)]
 pub struct GroupApp {
@@ -110,6 +112,9 @@ impl App {
         if members.is_empty() {
             return Err("this workspace has no windows to save".into());
         }
+        if members.len() > MAX_GROUP_APPS {
+            return Err(format!("a group can hold at most {MAX_GROUP_APPS} apps; this workspace has {}", members.len()));
+        }
         let mut apps = Vec::new();
         for &id in &members {
             let m = self.meta.get(&id).cloned().unwrap_or_default();
@@ -158,6 +163,10 @@ impl App {
             .collect();
         if apps.is_empty() {
             return Err("that group has no apps".into());
+        }
+        // Group files can be shared or hand-edited: never launch a flood.
+        if apps.len() > MAX_GROUP_APPS {
+            return Err(format!("that group lists {} apps; at most {MAX_GROUP_APPS} can be opened at once", apps.len()));
         }
         // A fresh workspace on the focused monitor.
         let (ws, _) = self.wm.resolve(&WsSel::Empty).ok_or("no free workspace")?;
