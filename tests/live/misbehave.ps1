@@ -54,7 +54,8 @@ Start-Sleep -Milliseconds 1500
 try {
     Write-Host "== a hung app"
     $procs += Spawn 'hyprwin-bad-hung' 'hang' 500
-    Start-Sleep -Milliseconds 3000
+    # It stops answering after 1.5 s; Windows calls it hung after 5 s more.
+    Start-Sleep -Milliseconds 7500
     $hh = [M7]::FindWindow([NullString]::Value, 'hyprwin-bad-hung')
     Check 'the app really is hung' ([M7]::IsHungAppWindow($hh)) "IsHungAppWindow=$([M7]::IsHungAppWindow($hh))"
     $slow = 0

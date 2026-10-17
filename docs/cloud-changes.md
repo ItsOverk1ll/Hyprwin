@@ -1,10 +1,14 @@
 # Cloud-Changes: review guide
 
 Work done on the `Cloud-Changes` branch in a cloud session (Linux, no Windows
-desktop). Every change type-checks for Windows; CI built and unit-tested every
-push on a real Windows runner. **Nothing here has run on a desktop yet.** This
-page lists what changed and how to check each item by hand before merging to
-`main`.
+desktop). Every change type-checks for Windows, and CI built and unit-tested
+every push on a real Windows runner.
+
+The **live suites also ran on GitHub's hosted Windows machines** (a real
+desktop session at 1024×768, Windows Server, no physical keyboard or mouse),
+side by side with `main`. See "Live results" below. They have **not** run on
+your desktop, with your apps, monitors and DPI. This page lists what changed
+and how to check each item by hand before merging to `main`.
 
 ## Before you start
 
@@ -39,6 +43,14 @@ and `restart.ps1`.
 | 14 | Reloading the config did not apply a changed `addreserved` until a monitor change. | reload | Change `addreserved` and save. Tiles move at once. |
 | 15 | The keybind editor showed `movefocus, left` (valid Hyprland) as a custom action instead of "Move focus left". | config | Put `bind = SUPER, A, movefocus, left` in the config and open Settings > Keybinds. It shows as Move focus. |
 | 16 | `hyprwinctl events \| grep -m1 …` never exited (writes to a closed pipe were ignored), and `-j` was stripped even from dispatch arguments. | hyprwinctl | `hyprwinctl events \| Select-Object -First 1` returns after one event. `hyprwinctl clients -j` still gives JSON. |
+| 18 | **A hung app could freeze all of hyprwin.** Three calls on other apps' windows waited for an answer: keeping floating windows on top (every focus change while a float is on screen), Super+drag raising, and restoring a maximized window. A hung app never answers. | app | `misbehave.ps1`. By hand: open a window that is "Not Responding" (e.g. a debugger-paused app), float another window, then focus around. hyprwin keeps working. |
+| 19 | **Windows of hidden workspaces showing on screen** after minimize/restore. Windows uncloaks a cloaked window when it is restored or activated, and hyprwin ignored that. It now hides them again. | app | `chaos.ps1`. By hand: put a window on workspace 2, minimize and restore it from the taskbar while on workspace 1 (or alt-tab to it). It must not appear on workspace 1 unless you switch to 2. |
+| 20 | **IPC:** one client that connected and never spoke froze IPC entirely on `main`. Each silent client also held a thread forever. Clients now get 2 s. | IPC | `chaos.ps1` |
+| 21 | **One request could crash the daemon:** about 100k nested `[[BATCH]]` prefixes overflowed the stack. Batches no longer nest. | IPC | `chaos.ps1` |
+| 22 | **One config or theme line could freeze or crash it:** `$b = $a$a$a…` chains grew tenfold per line until memory ran out, and a file sourcing itself twice was read 65,536 times. Values are now capped at 64 KB, loops are skipped, and at most 256 files are sourced. | config | Unit tests. |
+| 23 | Keybinds made in Settings were cut off at `#` (`exec start https://x.com/#top`, paths with `C#`), and a line break could inject config lines. Written values are now escaped. | config | Make a Settings keybind `exec` with a `#` in it, reopen Settings: it is intact. |
+| 24 | `workspace r+9223372036854775807` and similar overflowed; `moveworkspacetomonitor special …` turned the scratchpad into a monitor's regular workspace. | layout | Stress test (hostile selectors). |
+| 25 | Group or theme names like `con`/`nul`/`com1` (Windows device names) are now stored safely; a group launches at most 32 apps. | groups | Unit test. |
 | 17 | (Defensive) The animation curve solver could in theory step off the curve for unusual `bezier =` values. | anim | Covered by a 20,000-curve property test. |
 
 ## Speed
@@ -62,7 +74,25 @@ and `restart.ps1`.
 - `crates/hyprwin-config/tests/fuzz.rs`: 28,000 mutated or junk inputs per run. No parser panics.
 - Unit tests for border translation invariance, the pruned group layout and long direction names.
 - `tests/live/ux.ps1`: border-colour checks now wait for the colour to settle (up to 4 s) instead of a fixed sleep, and print a full diagnosis on failure. This should fix the one-in-ten flake.
-- CI also runs on pushes to `Cloud-Changes`.
+- `tests/live/chaos.ps1` and `tests/live/misbehave.ps1`: adversarial live suites. `animation-spike target` accepts `HYPRWIN_TARGET_MODE=hang|fight|titles` for them.
+- Config fuzz now includes variable bombs and source loops; the stress test includes hostile selectors.
+- CI also runs on pushes to `Cloud-Changes`, plus the live workflow above.
+
+## Live results (GitHub's Windows machines)
+
+`.github/workflows/live.yml` runs every `tests\live` suite for this branch and
+for `main` side by side, on commits whose message contains `[live]` (or by hand).
+Both builds run the same, newest test scripts.
+
+| Suite | `Cloud-Changes` | `main` |
+|---|---|---|
+| phase1, overflow, restart, minimize, ux, anim, border, keybinds, leak, taskbar | all pass (186 checks) | all pass |
+| chaos (new: bursts, parallel floods, bad pipe clients, reload storms, kills mid-animation) | 22/22 | stops early: a silent pipe client froze IPC |
+| misbehave (new: hung, fighting, title-spamming apps) | passes; one test-timing check fixed since | fails: the hung app froze the daemon, so nothing after it worked |
+
+Machine-specific fixes to the suites: minimum sizes in `overflow.ps1` are now
+fractions of the monitor (fixed sizes broke on small screens), and every suite's
+`Kill-Hyprwin` tolerates a process exiting while it is being killed.
 
 ## Things worth watching
 
