@@ -52,6 +52,10 @@ and `restart.ps1`.
 | 24 | `workspace r+9223372036854775807` and similar overflowed; `moveworkspacetomonitor special …` turned the scratchpad into a monitor's regular workspace. | layout | Stress test (hostile selectors). |
 | 25 | Group or theme names like `con`/`nul`/`com1` (Windows device names) are now stored safely; a group launches at most 32 apps. | groups | Unit test. |
 | 26 | (Follow-up to 1) A **bound** key whose release was lost stayed "held" for hyprwin, so its next press counted as auto-repeat and did nothing. Repeats now also have to be timely (auto-repeat never pauses for over a second). | `input.rs` | `keys.ps1` |
+| 27 | **Data loss: the Settings window could wipe `hyprland.conf`.** Applying a theme, saving settings, or `--bind` read the config and, if the read failed (saved by Notepad as ANSI or UTF-16, one accented comment in a legacy encoding, the file briefly locked), wrote back *only* the managed block. Rewrites now need a successful UTF-8 read (otherwise an error asks you to resave as UTF-8), are atomic, and keep your original once as `hyprland.conf.before-hyprwin`. | config/themes | Save the config as "ANSI" in Notepad with an `é` in a comment, apply a theme: an error appears and the file is untouched. Resave as UTF-8: the theme applies and the `.before-hyprwin` copy exists. |
+| 28 | Hand-edited managed block: an end marker before the start marker duplicated text, and a missing end marker made the **next save delete your lines** between the old start marker and the new block. Only the stray marker line is dropped now. | themes | Unit test. |
+| 29 | A config with one non-UTF-8 byte (or UTF-16 from Notepad, or a UTF-8 BOM) was unreadable: hyprwin ran with **no config at all**. All Notepad encodings load now (ANSI with a warning). | config | Unit test. |
+| 30 | Update check: the "open release page" link could open any URL GitHub's answer contained, via explorer.exe (which also runs local files). Only this project's release pages now. | settings | Settings > About > Check for updates still opens the releases page. |
 | 17 | (Defensive) The animation curve solver could in theory step off the curve for unusual `bezier =` values. | anim | Covered by a 20,000-curve property test. |
 
 ## Speed
@@ -103,6 +107,8 @@ fractions of the monitor (fixed sizes broke on small screens), and every suite's
 `Kill-Hyprwin` tolerates a process exiting while it is being killed.
 
 ## Things worth watching
+
+- **App Groups launch what their file lists.** A group file names programs (or Store app IDs) to start, so a group file from someone else deserves the same trust as a script.
 
 - **Tile floor (bug 3):** tiles never get smaller than 24 px plus gaps. With extreme `splitratio` values on small screens, a split may stop a few pixels short of the requested ratio. That is intended.
 - **Stuck-modifier fix (bug 1):** it trusts Windows' key state for modifiers. If another tool (AutoHotkey, PowerToys) swallows Super, hyprwin now follows what apps see. Test with your usual tools running.
