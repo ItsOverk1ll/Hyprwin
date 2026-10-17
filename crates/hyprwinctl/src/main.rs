@@ -20,15 +20,13 @@ fn usage() -> ! {
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Flags come before the command; later "-j"s belong to its arguments
+    // (e.g. `dispatch exec mytool -j`).
     let mut json = false;
-    args.retain(|a| {
-        if a == "-j" || a == "--json" {
-            json = true;
-            false
-        } else {
-            true
-        }
-    });
+    while args.first().is_some_and(|a| a == "-j" || a == "--json") {
+        json = true;
+        args.remove(0);
+    }
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         usage();
     }
@@ -44,8 +42,10 @@ fn main() {
         for line in BufReader::new(f).lines() {
             let Ok(line) = line else { break };
             let mut o = out.lock();
-            let _ = writeln!(o, "{line}");
-            let _ = o.flush();
+            // The reader went away (`hyprwinctl events | grep -m1 …`): stop.
+            if writeln!(o, "{line}").and_then(|_| o.flush()).is_err() {
+                break;
+            }
         }
         return;
     }
