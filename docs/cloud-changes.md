@@ -51,6 +51,7 @@ and `restart.ps1`.
 | 23 | Keybinds made in Settings were cut off at `#` (`exec start https://x.com/#top`, paths with `C#`), and a line break could inject config lines. Written values are now escaped. | config | Make a Settings keybind `exec` with a `#` in it, reopen Settings: it is intact. |
 | 24 | `workspace r+9223372036854775807` and similar overflowed; `moveworkspacetomonitor special …` turned the scratchpad into a monitor's regular workspace. | layout | Stress test (hostile selectors). |
 | 25 | Group or theme names like `con`/`nul`/`com1` (Windows device names) are now stored safely; a group launches at most 32 apps. | groups | Unit test. |
+| 26 | (Follow-up to 1) A **bound** key whose release was lost stayed "held" for hyprwin, so its next press counted as auto-repeat and did nothing. Repeats now also have to be timely (auto-repeat never pauses for over a second). | `input.rs` | `keys.ps1` |
 | 17 | (Defensive) The animation curve solver could in theory step off the curve for unusual `bezier =` values. | anim | Covered by a 20,000-curve property test. |
 
 ## Speed
@@ -74,7 +75,7 @@ and `restart.ps1`.
 - `crates/hyprwin-config/tests/fuzz.rs`: 28,000 mutated or junk inputs per run. No parser panics.
 - Unit tests for border translation invariance, the pruned group layout and long direction names.
 - `tests/live/ux.ps1`: border-colour checks now wait for the colour to settle (up to 4 s) instead of a fixed sleep, and print a full diagnosis on failure. This should fix the one-in-ten flake.
-- `tests/live/chaos.ps1` and `tests/live/misbehave.ps1`: adversarial live suites. `animation-spike target` accepts `HYPRWIN_TARGET_MODE=hang|fight|titles` for them.
+- `tests/live/chaos.ps1` and `tests/live/misbehave.ps1`: adversarial live suites. `tests/live/system.ps1` (explorer restart, resolution change) and `tests/live/keys.ps1` (lost key releases, key mashing). `animation-spike target` accepts `HYPRWIN_TARGET_MODE=hang|fight|titles` for them.
 - Config fuzz now includes variable bombs and source loops; the stress test includes hostile selectors.
 - CI also runs on pushes to `Cloud-Changes`, plus the live workflow above.
 
@@ -87,8 +88,10 @@ Both builds run the same, newest test scripts.
 | Suite | `Cloud-Changes` | `main` |
 |---|---|---|
 | phase1, overflow, restart, minimize, ux, anim, border, keybinds, leak, taskbar | all pass (186 checks) | all pass |
-| chaos (new: bursts, parallel floods, bad pipe clients, reload storms, kills mid-animation) | 22/22 | stops early: a silent pipe client froze IPC |
-| misbehave (new: hung, fighting, title-spamming apps) | passes; one test-timing check fixed since | fails: the hung app froze the daemon, so nothing after it worked |
+| **chaos** (bursts, parallel floods, bad pipe clients, nested-batch bomb, reload storms, kills mid-animation) | 22/22 | stops early: one silent pipe client froze IPC |
+| **misbehave** (hung, fighting, title-spamming apps) | 14/14: switches stay fast next to a hung app; 200 renames/s cost 0.8 % of a core | the hung app froze the daemon: windows no longer hidden, fights and title events lost |
+| **system** (explorer killed and restarted, live resolution change) | 13/13 | a window moved to a hidden workspace stays visible (the uncloak bug, from plain commands) |
+| **keys** (Super release lost as on Win+L, lost release of a bound key, 300 mashed chords) | 10/10 | plain `J` fired Super+J and plain `Shift+K` fired Super+Shift+K: **ordinary typing ran hotkeys**; a bound key stopped working after a lost release |
 
 Machine-specific fixes to the suites: minimum sizes in `overflow.ps1` are now
 fractions of the monitor (fixed sizes broke on small screens), and every suite's
