@@ -312,7 +312,7 @@ impl Master {
                 d = -d;
             }
             if flipped {
-                d = -d * if is_master { 1.0 } else { 1.0 };
+                d = -d;
             }
             let cur = self.mfact(cfg);
             self.mfact = Some((cur + d).clamp(0.05, 0.95));

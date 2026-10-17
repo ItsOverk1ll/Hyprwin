@@ -484,9 +484,7 @@ impl App {
         }
         let _ = self.ledger.save();
         debug!("unmanage {:#x}", id);
-        for m in [&mut self.placed_at] {
-            m.remove(&id);
-        }
+        self.placed_at.remove(&id);
         self.fights.remove(&id);
         self.pending_min.remove(&id);
         self.stubborn.remove(&id);

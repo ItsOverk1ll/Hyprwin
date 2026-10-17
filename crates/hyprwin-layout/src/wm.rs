@@ -393,8 +393,7 @@ impl Wm {
                 gaps_out: rule.as_ref().and_then(|r| r.gaps_out),
             };
             self.workspaces.insert(id, ws);
-            let kind = if id < 0 { "createworkspace" } else { "createworkspace" };
-            self.effects.push(Effect::Event { name: kind, data: self.workspaces[&id].name.clone() });
+            self.effects.push(Effect::Event { name: "createworkspace", data: self.workspaces[&id].name.clone() });
         }
         id
     }

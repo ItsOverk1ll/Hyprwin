@@ -181,7 +181,17 @@ pub fn match_action(dispatcher: &str, arg: &str) -> Option<(usize, String)> {
             ArgKind::Fixed(f) if f.eq_ignore_ascii_case(arg) => Some((i, String::new())),
             ArgKind::Fixed(_) => None,
             ArgKind::Workspace => arg.parse::<u32>().ok().filter(|n| (1..=10).contains(n)).map(|n| (i, n.to_string())),
-            ArgKind::Direction => DIRECTIONS.iter().find(|(_, d)| d.eq_ignore_ascii_case(arg) || arg.eq_ignore_ascii_case(&d.repeat(1))).map(|(_, d)| (i, d.to_string())),
+            // Any spelling the daemon accepts: l / left, u / up / t / top, …
+            ArgKind::Direction => {
+                let short = match arg.to_ascii_lowercase().as_str() {
+                    "l" | "left" => "l",
+                    "r" | "right" => "r",
+                    "u" | "up" | "t" | "top" => "u",
+                    "d" | "down" | "b" | "bottom" => "d",
+                    _ => return None,
+                };
+                DIRECTIONS.iter().find(|(_, d)| *d == short).map(|(_, d)| (i, d.to_string()))
+            }
             ArgKind::Text(_) => Some((i, arg.to_string())),
         }
     })
@@ -254,6 +264,10 @@ mod tests {
         assert_eq!(match_action("fullscreen", "1").map(|m| ACTIONS[m.0].label), Some("Maximize"));
         assert_eq!(match_action("exec", "wt").map(|m| m.1), Some("wt".into()));
         assert!(match_action("resizeactive", "10 0").is_none());
+        // Long direction names are the same action as the short ones.
+        assert_eq!(match_action("movefocus", "left"), match_action("movefocus", "l"));
+        assert_eq!(match_action("movewindow", "Down").map(|m| m.1), Some("d".into()));
+        assert!(match_action("movefocus", "sideways").is_none());
         for a in ACTIONS {
             let arg = match a.arg {
                 ArgKind::Fixed(f) => f.to_string(),
