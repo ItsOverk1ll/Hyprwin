@@ -3,6 +3,7 @@
 # so environment quirks can be told apart from regressions.
 #
 # Only runs for pushes whose commit message contains "[live]", or by hand.
+# "[soak]" runs the 10-minute soak test (this branch only).
 name: Live tests
 
 on:
@@ -87,3 +88,20 @@ jobs:
         with:
           name: live-results-${{ matrix.ref }}
           path: live-results
+
+  soak:
+    if: contains(github.event.head_commit.message, '[soak]')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ github.ref_name }}
+      - name: Build (release)
+        run: cargo build --release --workspace
+      - name: Soak (10 minutes)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\soak.ps1
