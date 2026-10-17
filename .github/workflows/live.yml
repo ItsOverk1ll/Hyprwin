@@ -41,7 +41,7 @@ jobs:
       - name: Live suites
         shell: powershell
         run: |
-          $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar'
+          $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar', 'chaos'
           New-Item -ItemType Directory -Force live-results | Out-Null
           $summary = @()
           foreach ($s in $suites) {
