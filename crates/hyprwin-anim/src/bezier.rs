@@ -58,6 +58,9 @@ impl Bezier {
                 break;
             }
             t -= err / d;
+            if !(0.0..=1.0).contains(&t) {
+                break; // left the curve: another root of the cubic
+            }
         }
         let (mut lo, mut hi) = (0.0, 1.0);
         t = x;
@@ -118,6 +121,27 @@ mod tests {
             let v = Bezier::HYPR_DEFAULT.ease(i as f64 / 1000.0);
             assert!(v + 1e-9 >= last);
             last = v;
+        }
+    }
+
+    #[test]
+    fn solves_on_the_curve_for_any_control_points() {
+        // Newton's method may wander outside [0, 1] to another root of the
+        // cubic; the answer must always be the point on the curve.
+        let mut seed = 0x1234_5678_9abc_def0u64;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..20_000 {
+            let (x1, x2) = (rnd(), rnd());
+            let b = Bezier::new(x1, rnd() * 3.0 - 1.0, x2, rnd() * 3.0 - 1.0);
+            let x = rnd();
+            let t = b.solve_t(x);
+            assert!((0.0..=1.0).contains(&t), "t={t} for x={x} in {b:?}");
+            assert!((Bezier::coord(t, b.x1, b.x2) - x).abs() < 1e-4, "x({t}) != {x} for {b:?}");
         }
     }
 }
