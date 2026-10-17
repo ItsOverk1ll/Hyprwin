@@ -125,13 +125,15 @@ pub fn set_binds(binds: &[Bind], submaps: &HashMap<String, u32>) {
 
 struct HookState {
     down: [bool; 256],
+    /// Event time (ms) of each key's last key-down.
+    last_down: [u32; 256],
     swallowed: [bool; 256],
     pending_release: [Option<usize>; 256],
 }
 
 impl Default for HookState {
     fn default() -> Self {
-        Self { down: [false; 256], swallowed: [false; 256], pending_release: [None; 256] }
+        Self { down: [false; 256], last_down: [0; 256], swallowed: [false; 256], pending_release: [None; 256] }
     }
 }
 
@@ -225,7 +227,7 @@ unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
         let k = unsafe { &*(lp.0 as *const KBDLLHOOKSTRUCT) };
         if k.dwExtraInfo != MARK {
             let down = wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN;
-            if handle_key((k.vkCode & 0xFF) as usize, down) {
+            if handle_key((k.vkCode & 0xFF) as usize, down, k.time) {
                 return LRESULT(1);
             }
         }
@@ -233,14 +235,24 @@ unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
     unsafe { CallNextHookEx(None, code, wp, lp) }
 }
 
-fn handle_key(vk: usize, down: bool) -> bool {
+/// Longest gap between a key's auto-repeats: Windows' longest repeat delay
+/// is 1 s. A "repeat" after a longer silence is a key whose release was lost.
+const REPEAT_GAP_MS: u32 = 1100;
+
+fn handle_key(vk: usize, down: bool, time: u32) -> bool {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         if down {
             // A key whose release was lost (see `drop_stale_modifiers`) would
             // look like auto-repeat and its binds would never fire again.
-            // Swallowed keys are never down for Windows, so they cannot be checked.
-            let repeat = s.down[vk] && (s.swallowed[vk] || unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 != 0);
+            // Swallowed keys are never down for Windows, so for them only the
+            // timing tells: auto-repeat never pauses for over a second.
+            let recent = time.wrapping_sub(s.last_down[vk]) <= REPEAT_GAP_MS;
+            let repeat = s.down[vk] && recent && (s.swallowed[vk] || unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 != 0);
+            s.last_down[vk] = time;
+            if s.down[vk] && !repeat {
+                s.swallowed[vk] = false; // stale from the lost release
+            }
             s.down[vk] = true;
             if is_modifier(vk) {
                 return false;

@@ -49,7 +49,7 @@ jobs:
         run: |
           # Suites report through their exit code; their stderr is not fatal here.
           $ErrorActionPreference = 'Continue'
-          $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar', 'chaos', 'misbehave', 'system'
+          $suites = 'phase1', 'overflow', 'restart', 'minimize', 'ux', 'anim', 'border', 'keybinds', 'leak', 'taskbar', 'chaos', 'misbehave', 'system', 'keys'
           New-Item -ItemType Directory -Force live-results | Out-Null
           $summary = @()
           foreach ($s in $suites) {
