@@ -39,6 +39,23 @@ function Border($h) {
     $dc = [U5]::GetDC([IntPtr]::Zero); $px = [U5]::GetPixel($dc, $r.L, [int](($r.T + $r.B) / 2)); [void][U5]::ReleaseDC([IntPtr]::Zero, $dc)
     $px   # COLORREF 0x00BBGGRR
 }
+# Polls a border colour until it matches (or 4 s pass): theme and settings
+# changes reload the config and animate the windows to new gaps, and a fixed
+# sleep raced that on a busy machine. On failure, prints what was on screen
+# over time and the daemon's view, so a flake explains itself.
+function BorderSettles($h, $want, [bool]$equal = $true) {
+    $seen = @(); $t0 = Get-Date
+    do {
+        $px = Border $h; $seen += ("{0:X6}@{1}ms" -f $px, [int]((Get-Date) - $t0).TotalMilliseconds)
+        if ((Near $px $want) -eq $equal) { return @($true, ("0x{0:X6}" -f $px)) }
+        Start-Sleep -Milliseconds 100
+    } while (((Get-Date) - $t0).TotalMilliseconds -lt 4000)
+    $r = New-Object RCT; [void][U5]::DwmGetWindowAttribute($h, 9, [ref]$r, 16)
+    $detail = "samples: $($seen[0..3] -join ' ') ... $($seen[-3..-1] -join ' ')`n" +
+        "      frame=$($r.L),$($r.T)-$($r.R),$($r.B) cloaked=$(Cloaked $h) active=$(((Ctl -j activewindow) | ConvertFrom-Json).title)`n" +
+        "      log tail:`n" + ((Get-Content "$env:HYPRWIN_STATE_DIR\hyprwin.log" -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { "        $_" }) -join "`n")
+    @($false, $detail)
+}
 function Near($a, $b) { $d = { param($x, $s) ($x -shr $s) -band 0xFF }; ([math]::Abs((& $d $a 0) - (& $d $b 0)) -le 24) -and ([math]::Abs((& $d $a 8) - (& $d $b 8)) -le 24) -and ([math]::Abs((& $d $a 16) - (& $d $b 16)) -le 24) }
 function Kill-Hyprwin { Get-Process hyprwin, hyprwin-guard -ErrorAction SilentlyContinue | ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" | Invoke-CimMethod -MethodName Terminate | Out-Null } }
 function Notepads { (Ctl -j clients | ConvertFrom-Json) | Where-Object { $_.class -eq 'notepad' } }
@@ -73,21 +90,23 @@ try {
     Ctl dispatch focuswindow title:hyprwin-ux-a | Out-Null; Start-Sleep -Milliseconds 300
     $p = Start-Process "$bin\hyprwin-settings.exe" -ArgumentList '--apply-theme', 'nord' -PassThru -Wait
     Check 'apply-theme exits cleanly' ($p.ExitCode -eq 0)
-    Start-Sleep -Milliseconds 1200
+    Start-Sleep -Milliseconds 600
     Check 'config gained the managed theme block' ((Get-Content $cfg -Raw) -match 'themes\\nord\.conf')
-    Check 'focused window border is Nord frost blue (88c0d0)' (Near (Border $ha) 0x00D0C088) ("0x{0:X6}" -f (Border $ha))
+    $b = BorderSettles $ha 0x00D0C088
+    Check 'focused window border is Nord frost blue (88c0d0)' $b[0] $b[1]
     $fw = ((Ctl -j activewindow) | ConvertFrom-Json).title
     Check 'focus is still on ux-a after the theme reload' ($fw -eq 'hyprwin-ux-a') $fw
     # The 1 px inactive border blends with whatever is behind the gap at
     # fractional DPI, so only check that it is not the focused colour.
-    Check 'other window border is not the focused colour' (-not (Near (Border $hb) 0x00D0C088)) ("0x{0:X6}" -f (Border $hb))
+    $b = BorderSettles $hb 0x00D0C088 $false
+    Check 'other window border is not the focused colour' $b[0] $b[1]
     $p = Start-Process "$bin\hyprwin-settings.exe" -ArgumentList '--apply-theme', 'does-not-exist' -PassThru -Wait
     Check 'unknown theme is rejected' ($p.ExitCode -ne 0)
 
     Write-Host "`n== settings.conf overrides the theme"
     Set-Content "$sandbox\hyprwin\settings.conf" "general:col.active_border = rgba(ff0000ff)`ngeneral:gaps_out = 0"
-    Start-Sleep -Milliseconds 1200
-    Check 'settings.conf colour wins' (Near (Border $ha) 0x000000FF) ("0x{0:X6}" -f (Border $ha))
+    $b = BorderSettles $ha 0x000000FF
+    Check 'settings.conf colour wins' $b[0] $b[1]
     $c = Ctl -j clients | ConvertFrom-Json
     Check 'settings.conf gaps applied (window touches the screen edge)' ((($c | ForEach-Object { $_.at[0] }) | Measure-Object -Minimum).Minimum -eq 0)
     Set-Content "$sandbox\hyprwin\settings.conf" ""
@@ -100,7 +119,8 @@ try {
     Ctl pause | Out-Null; Start-Sleep -Milliseconds 800
     Check 'status reports paused' (((Ctl status) | ConvertFrom-Json).paused -eq $true)
     Check 'pausing hands every window back (ws 2 window visible)' ((Cloaked $hb) -eq 0)
-    Check 'borders reset while paused (no longer red)' (-not (Near (Border $ha) 0x000000FF)) ("0x{0:X6}" -f (Border $ha))
+    $b = BorderSettles $ha 0x000000FF $false
+    Check 'borders reset while paused (no longer red)' $b[0] $b[1]
     Ctl resume | Out-Null; Start-Sleep -Milliseconds 1500
     $c = Ctl -j clients | ConvertFrom-Json
     Check 'resume restores the layout (b back on ws 2, hidden)' ((($c | Where-Object { $_.title -eq 'hyprwin-ux-b' }).workspace.id -eq 2) -and ((Cloaked $hb) -ne 0))
