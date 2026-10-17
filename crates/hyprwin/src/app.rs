@@ -836,7 +836,6 @@ impl App {
                 info!("{:#x} maximized itself: treating as fullscreen 1", id);
                 let fx = self.wm.focus_window(id);
                 self.apply(fx);
-                desired_all = self.wm.desired_rects();
                 let fx = self.wm.fullscreen(FullscreenMode::Maximized, Some(true));
                 self.apply(fx);
                 desired_all = self.wm.desired_rects();

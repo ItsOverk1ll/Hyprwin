@@ -127,20 +127,31 @@ pub fn accept(name: &str, sec: &PipeSecurity, outbound_only: bool) -> std::io::R
 
 /// Connects to a pipe as a client, waiting up to `timeout_ms` for a free instance.
 pub fn connect(name: &str, write: bool, timeout_ms: u32) -> std::io::Result<std::fs::File> {
+    use std::time::{Duration, Instant};
     let n = wide(name);
     let access = if write { GENERIC_READ.0 | GENERIC_WRITE.0 } else { GENERIC_READ.0 };
-    for _ in 0..2 {
+    let start = Instant::now();
+    let deadline = start + Duration::from_millis(timeout_ms as u64);
+    // A missing pipe usually means no daemon, so give up on that sooner.
+    let not_found_deadline = start + Duration::from_millis(timeout_ms.min(300) as u64);
+    loop {
         let h = unsafe { CreateFileW(PCWSTR(n.as_ptr()), access, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) };
+        let now = Instant::now();
         match h {
             Ok(h) => return Ok(unsafe { std::fs::File::from_raw_handle(h.0 as _) }),
-            Err(e) if e.code().0 as u32 == 0x8007_00E7 => {
-                // ERROR_PIPE_BUSY
-                let _ = unsafe { WaitNamedPipeW(PCWSTR(n.as_ptr()), timeout_ms) };
+            // ERROR_PIPE_BUSY: every instance is taken; wait for one.
+            Err(e) if e.code().0 as u32 == 0x8007_00E7 && now < deadline => {
+                let left = (deadline - now).as_millis().max(1) as u32;
+                let _ = unsafe { WaitNamedPipeW(PCWSTR(n.as_ptr()), left) };
+            }
+            // ERROR_FILE_NOT_FOUND: no daemon, or it is between two pipe
+            // instances for a moment. Retry briefly.
+            Err(e) if e.code().0 as u32 == 0x8007_0002 && now < not_found_deadline => {
+                std::thread::sleep(Duration::from_millis(10));
             }
             Err(e) => return Err(std::io::Error::other(format!("{name}: {e}"))),
         }
     }
-    Err(std::io::Error::other("pipe busy"))
 }
 
 /// Client helper: sends one request and returns the full reply.

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -348,20 +348,32 @@ fn start_ipc(tx: Sender<IpcJob>, events: Receiver<String>) {
                     std::thread::sleep(Duration::from_millis(200));
                     continue;
                 };
-                let Ok(req) = hyprwin_ipc::read_request(&mut f) else { continue };
-                let (rtx, rrx) = channel();
-                if tx.send((req, rtx)).is_err() {
-                    return;
+                // Serve each client on its own thread and go straight back to
+                // listening: a slow or silent client must not leave the pipe
+                // without a listener (other clients would fail to connect).
+                let tx = tx.clone();
+                let served = std::thread::Builder::new().name("hyprwin-ipc-client".into()).spawn(move || {
+                    let Ok(req) = hyprwin_ipc::read_request(&mut f) else { return };
+                    let (rtx, rrx) = channel();
+                    if tx.send((req, rtx)).is_err() {
+                        return;
+                    }
+                    post(WM_APP_IPC, 0, 0);
+                    let reply = rrx.recv_timeout(Duration::from_secs(3)).unwrap_or_else(|_| "error: daemon busy".into());
+                    let _ = f.write_all(reply.as_bytes());
+                    let _ = f.flush();
+                });
+                if served.is_err() {
+                    std::thread::sleep(Duration::from_millis(50));
                 }
-                post(WM_APP_IPC, 0, 0);
-                let reply = rrx.recv_timeout(Duration::from_secs(3)).unwrap_or_else(|_| "error: daemon busy".into());
-                let _ = f.write_all(reply.as_bytes());
-                let _ = f.flush();
             }
         })
         .ok();
 
-    let subscribers: Arc<Mutex<Vec<std::fs::File>>> = Arc::new(Mutex::new(Vec::new()));
+    // Each subscriber gets its own writer thread behind a bounded queue: one
+    // that stops reading (a hung bar) is dropped when its queue fills, instead
+    // of blocking every other subscriber and growing the event backlog forever.
+    let subscribers: Arc<Mutex<Vec<SyncSender<Arc<str>>>>> = Arc::new(Mutex::new(Vec::new()));
     let subs = subscribers.clone();
     let s2 = sec.clone();
     std::thread::Builder::new()
@@ -370,7 +382,19 @@ fn start_ipc(tx: Sender<IpcJob>, events: Receiver<String>) {
             let name = hyprwin_ipc::event_pipe_name();
             loop {
                 match hyprwin_ipc::accept(&name, &s2, true) {
-                    Ok(f) => subs.lock().unwrap().push(f),
+                    Ok(mut f) => {
+                        let (stx, srx) = sync_channel::<Arc<str>>(4096);
+                        let started = std::thread::Builder::new().name("hyprwin-ipc-subscriber".into()).spawn(move || {
+                            for line in srx {
+                                if f.write_all(line.as_bytes()).is_err() {
+                                    return;
+                                }
+                            }
+                        });
+                        if started.is_ok() {
+                            subs.lock().unwrap_or_else(|e| e.into_inner()).push(stx);
+                        }
+                    }
                     Err(_) => std::thread::sleep(Duration::from_millis(200)),
                 }
             }
@@ -380,8 +404,9 @@ fn start_ipc(tx: Sender<IpcJob>, events: Receiver<String>) {
         .name("hyprwin-ipc-events-write".into())
         .spawn(move || {
             for line in events {
-                let mut subs = subscribers.lock().unwrap();
-                subs.retain_mut(|f| f.write_all(line.as_bytes()).is_ok());
+                let line: Arc<str> = line.into();
+                let mut subs = subscribers.lock().unwrap_or_else(|e| e.into_inner());
+                subs.retain(|s| s.try_send(line.clone()).is_ok());
             }
         })
         .ok();
