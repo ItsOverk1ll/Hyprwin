@@ -64,6 +64,12 @@ impl Default for WmConfig {
     }
 }
 
+/// Tiles per workspace, computed once per operation.
+type TileCache = std::collections::HashMap<WsId, Vec<(WinId, Rect)>>;
+
+/// Smallest visible tile edge (logical px) the layout hands out.
+const MIN_TILE: i32 = 24;
+
 // ------------------------------------------------------------------ model
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -499,9 +505,27 @@ impl Wm {
     }
 
     fn move_pinned(&mut self, from: WsId, to: WsId) {
-        let pinned: Vec<WinId> = self.windows.values().filter(|w| w.ws == from && w.pinned).map(|w| w.id).collect();
+        let pinned: Vec<WinId> = self.windows.values().filter(|w| w.ws == from && w.pinned && w.floating).map(|w| w.id).collect();
         for id in pinned {
+            self.leave_ws(id);
             self.windows.get_mut(&id).unwrap().ws = to;
+        }
+    }
+
+    /// Call before `id` moves to another workspace: it gives up the
+    /// fullscreen slot of the one it leaves.
+    fn leave_ws(&mut self, id: WinId) {
+        if let Some(ws) = self.windows.get(&id).map(|w| w.ws) {
+            self.drop_fullscreen(ws, id);
+        }
+    }
+
+    fn drop_fullscreen(&mut self, ws: WsId, id: WinId) {
+        if let Some(w) = self.workspaces.get_mut(&ws) {
+            if w.fullscreen.is_some_and(|f| f.0 == id) {
+                w.fullscreen = None;
+                self.effects.push(Effect::SetFullscreen { id, on: false });
+            }
         }
     }
 
@@ -548,6 +572,7 @@ impl Wm {
         let mon = self.workspaces.get(&src).map(|x| x.monitor).unwrap_or(self.focused_monitor);
         self.ensure_ws(id, Some(&name), mon);
         self.detach(w);
+        self.leave_ws(w);
         {
             let win = self.windows.get_mut(&w).unwrap();
             win.ws = id;
@@ -788,6 +813,11 @@ impl Wm {
     fn set_focus(&mut self, id: Option<WinId>) {
         if let Some(id) = id {
             let Some(w) = self.windows.get(&id) else { return };
+            if w.minimized {
+                // Keyboard commands act on the focused window: never let that
+                // be one the user cannot see.
+                return;
+            }
             let ws = w.ws;
             self.history.retain(|&x| x != id);
             self.history.push(id);
@@ -854,11 +884,13 @@ impl Wm {
         let b = self.cfg.border_reserve;
         // A tile must hold the window's minimum plus its inner gaps and border.
         let pad = (gin.left + gin.right + 2 * b, gin.top + gin.bottom + 2 * b);
+        // Every tile keeps a sliver of its own: without a floor, a neighbour's
+        // large minimum could squeeze a window to nothing, and a zero-size tile
+        // becomes a 1 px window stacked on top of that neighbour.
+        let floor = (MIN_TILE as f64 * self.monitors[w.monitor.min(self.monitors.len() - 1)].spec.scale).round() as i32;
         let min = |id: WinId| -> (i32, i32) {
-            match self.windows.get(&id) {
-                Some(x) if x.min_size != (0, 0) => (x.min_size.0 + pad.0, x.min_size.1 + pad.1),
-                _ => (0, 0),
-            }
+            let m = self.windows.get(&id).map(|x| x.min_size).unwrap_or((0, 0));
+            (m.0.max(floor) + pad.0, m.1.max(floor) + pad.1)
         };
         // Minimized windows keep their slot in the tree but take no space:
         // lay out a pruned copy (their splits collapse like a removal).
@@ -894,9 +926,27 @@ impl Wm {
         self.layout_rect(id)
     }
 
+    /// [`desired_rect`](Self::desired_rect) of every visible window, computed
+    /// in one pass (each workspace's layout once).
+    pub fn desired_rects(&self) -> std::collections::HashMap<WinId, Rect> {
+        let mut cache = TileCache::new();
+        self.windows
+            .values()
+            .filter(|w| !w.minimized && self.is_visible_ws(w.ws))
+            .filter_map(|w| self.layout_rect_cached(w.id, &mut cache).map(|r| (w.id, r)))
+            .collect()
+    }
+
     /// Where a window sits in its workspace's layout, even if that workspace
     /// is not shown right now (what `hyprctl clients` reports).
     pub fn layout_rect(&self, id: WinId) -> Option<Rect> {
+        self.layout_rect_cached(id, &mut TileCache::new())
+    }
+
+    /// [`layout_rect`](Self::layout_rect), computing each workspace's tiles
+    /// at most once per `cache` (a full layout per window made `sync`
+    /// quadratic in the number of windows).
+    fn layout_rect_cached(&self, id: WinId, cache: &mut TileCache) -> Option<Rect> {
         let w = self.windows.get(&id)?;
         if w.minimized {
             return None;
@@ -914,16 +964,17 @@ impl Wm {
         if w.floating {
             return Some(w.float_rect);
         }
-        self.tiled_rects(w.ws).into_iter().find(|(x, _)| *x == id).map(|(_, r)| r)
+        cache.entry(w.ws).or_insert_with(|| self.tiled_rects(w.ws)).iter().find(|(x, _)| *x == id).map(|(_, r)| *r)
     }
 
     /// Visible windows with their rects (for directional focus), floating last.
     fn visible_rects(&self) -> Vec<(WinId, Rect)> {
+        let mut cache = TileCache::new();
         let mut v: Vec<(WinId, Rect)> = self
             .windows
             .values()
             .filter(|w| !w.minimized && self.is_visible_ws(w.ws))
-            .filter_map(|w| self.desired_rect(w.id).map(|r| (w.id, r)))
+            .filter_map(|w| self.layout_rect_cached(w.id, &mut cache).map(|r| (w.id, r)))
             .collect();
         v.sort_by_key(|(id, _)| self.windows[id].floating);
         v
@@ -936,6 +987,7 @@ impl Wm {
         let ids: Vec<WinId> = self.windows.keys().copied().collect();
         let mut shows = Vec::new();
         let mut hides = Vec::new();
+        let mut cache = TileCache::new();
         for id in ids {
             let w = &self.windows[&id];
             let visible = !w.minimized && self.is_visible_ws(w.ws);
@@ -943,7 +995,7 @@ impl Wm {
                 continue;
             }
             if visible {
-                if let Some(r) = self.desired_rect(id) {
+                if let Some(r) = self.layout_rect_cached(id, &mut cache) {
                     if self.windows[&id].placed != Some(r) {
                         self.effects.push(Effect::Place { id, rect: r, anim: Anim::Move });
                         self.windows.get_mut(&id).unwrap().placed = Some(r);
@@ -1107,6 +1159,7 @@ impl Wm {
                 if let Some(m) = neighbor(self.monitors[cur].spec.rect, dir, &mons) {
                     let target_ws = self.monitors[m].active;
                     self.detach(f);
+                    self.leave_ws(f);
                     self.windows.get_mut(&f).unwrap().ws = target_ws;
                     self.focused_monitor = m;
                     self.attach(f, None);
@@ -1211,6 +1264,7 @@ impl Wm {
             self.windows.get_mut(&id).unwrap().ws = n;
             self.attach(id, None);
             if self.ws_fits(n) {
+                self.drop_fullscreen(src, id);
                 let name = self.workspaces[&n].name.clone();
                 self.effects.push(Effect::Event { name: "movewindow", data: format!("{id:x},{name}") });
                 self.effects.push(Effect::Event { name: "movewindowv2", data: format!("{id:x},{n},{name}") });
@@ -1345,7 +1399,9 @@ impl Wm {
             self.windows.get_mut(&id).unwrap().floating = false;
             self.attach(id, None);
             if self.try_fit(ws) {
-                self.windows.get_mut(&id).unwrap().auto_float = false;
+                let w = self.windows.get_mut(&id).unwrap();
+                w.auto_float = false;
+                w.pinned = false; // only floating windows can be pinned
                 self.effects.push(Effect::Event { name: "changefloatingmode", data: format!("{id:x},0") });
             } else {
                 self.detach(id);
@@ -1575,6 +1631,7 @@ impl Wm {
             let ws_mon = self.workspaces[&w.ws].monitor;
             if target_mon != ws_mon && w.ws > 0 {
                 let target_ws = self.monitors[target_mon].active;
+                self.leave_ws(id);
                 self.windows.get_mut(&id).unwrap().ws = target_ws;
             }
             self.windows.get_mut(&id).unwrap().placed = Some(rect);
@@ -1597,6 +1654,7 @@ impl Wm {
                     Dir::Down
                 };
                 self.detach(id);
+                self.leave_ws(id);
                 self.windows.get_mut(&id).unwrap().ws = target_ws;
                 let (dcfg, mcfg) = (self.cfg.dwindle.clone(), self.cfg.master.clone());
                 let area = self.layout_area(target_ws);
@@ -1613,6 +1671,7 @@ impl Wm {
             }
             None if target_ws != w.ws => {
                 self.detach(id);
+                self.leave_ws(id);
                 self.windows.get_mut(&id).unwrap().ws = target_ws;
                 self.attach(id, Some(cursor));
             }
@@ -1890,7 +1949,7 @@ impl Wm {
             };
             let last_focus = s["last_focus"].as_u64().filter(|w| self.windows.contains_key(w));
             let fullscreen = s["fullscreen"].as_array().and_then(|f| {
-                let w = f.first()?.as_u64().filter(|w| self.windows.contains_key(w))?;
+                let w = f.first()?.as_u64().filter(|w| self.windows.get(w).is_some_and(|x| x.ws == id))?;
                 Some((w, if f.get(1)?.as_bool()? { FullscreenMode::Maximized } else { FullscreenMode::Fullscreen }))
             });
             let ws = self.workspaces.get_mut(&id).unwrap();

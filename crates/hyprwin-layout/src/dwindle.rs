@@ -463,10 +463,31 @@ impl Dwindle {
             }
             t
         };
+        // Screening a candidate is pure arithmetic: everything fits exactly
+        // when the root's minimum (widths add up across side-by-side splits,
+        // heights across stacked ones) fits the area. Only the winner is
+        // built and laid out for real.
+        let Some(root) = base.root else { return false };
+        let mut dirs: Vec<bool> = vec![false; base.nodes.len()];
+        let mut leaf_min: Vec<(i32, i32)> = vec![(0, 0); base.nodes.len()];
+        for (i, n) in base.nodes.iter().enumerate() {
+            match n.as_ref().map(|n| &n.kind) {
+                Some(Kind::Split { split_top, locked: true, .. }) => dirs[i] = *split_top,
+                Some(Kind::Leaf(w)) => leaf_min[i] = min(*w),
+                _ => {}
+            }
+        }
         // Fewest flips first.
         let mut masks: Vec<u32> = (1..(1u32 << k)).collect();
         masks.sort_by_key(|m| m.count_ones());
         for mask in masks {
+            for (i, &(n, dir)) in splits.iter().enumerate() {
+                dirs[n] = dir ^ (mask >> i & 1 == 1);
+            }
+            let (w, h) = base.required(root, &dirs, &leaf_min);
+            if w > area.w || h > area.h {
+                continue;
+            }
             let t = candidate(mask);
             if t.fits(area, cfg, min) {
                 *self = t;
@@ -474,6 +495,18 @@ impl Dwindle {
             }
         }
         false
+    }
+
+    /// Smallest box subtree `n` needs with split directions `dirs`.
+    fn required(&self, n: NodeId, dirs: &[bool], leaf_min: &[(i32, i32)]) -> (i32, i32) {
+        match &self.node(n).kind {
+            Kind::Leaf(_) => leaf_min[n],
+            Kind::Split { children, .. } => {
+                let a = self.required(children[0], dirs, leaf_min);
+                let b = self.required(children[1], dirs, leaf_min);
+                if dirs[n] { (a.0.max(b.0), a.1 + b.1) } else { (a.0 + b.0, a.1.max(b.1)) }
+            }
+        }
     }
 }
 

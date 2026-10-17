@@ -802,10 +802,13 @@ impl App {
             }
             self.verify_pending = true;
         }
+        // Recomputed after anything below re-tiles (it changes other windows' targets).
+        let mut desired_all = self.wm.desired_rects();
         for id in ids {
             let h = hwnd(id);
             if !window::is_alive(h) {
                 self.unmanage(id);
+                desired_all = self.wm.desired_rects();
                 continue;
             }
             if self.is_animating(id) {
@@ -821,10 +824,11 @@ impl App {
                 if !self.wm.windows[&id].minimized {
                     let fx = self.wm.set_minimized(id, true);
                     self.apply(fx);
+                    desired_all = self.wm.desired_rects();
                 }
                 continue;
             }
-            let Some(desired) = self.wm.desired_rect(id) else { continue };
+            let Some(desired) = desired_all.get(&id).copied() else { continue };
             if self.ledger.hidden.contains_key(&(h.0 as isize)) {
                 continue;
             }
@@ -832,8 +836,10 @@ impl App {
                 info!("{:#x} maximized itself: treating as fullscreen 1", id);
                 let fx = self.wm.focus_window(id);
                 self.apply(fx);
+                desired_all = self.wm.desired_rects();
                 let fx = self.wm.fullscreen(FullscreenMode::Maximized, Some(true));
                 self.apply(fx);
+                desired_all = self.wm.desired_rects();
                 unsafe {
                     let _ = ShowWindowAsync(h, SW_RESTORE);
                 }
@@ -848,6 +854,7 @@ impl App {
                 // The user (or app) moved a floating window: accept it.
                 let fx = self.wm.on_user_move(id, actual, actual.center());
                 self.apply(fx);
+                desired_all = self.wm.desired_rects();
                 continue;
             }
             let bigger = actual.w > desired.w + 1 || actual.h > desired.h + 1;
@@ -870,6 +877,7 @@ impl App {
                     self.wm.invalidate(id);
                     let fx = self.wm.sync();
                     self.apply(fx);
+                    desired_all = self.wm.desired_rects();
                 }
                 self.schedule_verify();
                 continue;
@@ -883,6 +891,7 @@ impl App {
                     info!("{:#x} ({}) has a minimum size of {}x{}; re-tiling", id, self.meta.get(&id).map(|m| m.class.as_str()).unwrap_or("?"), min.0, min.1);
                     let fx = self.wm.set_min_size(id, min.0, min.1);
                     self.apply(fx);
+                    desired_all = self.wm.desired_rects();
                     // Still does not fit (too many windows for the screen): float it.
                     if let Some(d) = self.wm.desired_rect(id) {
                         if d.w + 2 < min.0 || d.h + 2 < min.1 {
@@ -895,6 +904,7 @@ impl App {
                                 }
                             }
                             self.apply(fx);
+                            desired_all = self.wm.desired_rects();
                         }
                     }
                     continue;
@@ -922,6 +932,7 @@ impl App {
             self.wm.invalidate(id);
             let fx = self.wm.sync();
             self.apply(fx);
+            desired_all = self.wm.desired_rects();
         }
     }
 
