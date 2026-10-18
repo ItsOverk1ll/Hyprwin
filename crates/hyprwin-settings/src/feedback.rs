@@ -294,7 +294,11 @@ fn reveal(path: &Path) {
 impl Feedback {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         ui.heading("Feedback");
-        ui.label("Found a problem, or have an idea? Tell us here. It goes straight to the developer.");
+        ui.label(if webhook().is_some() {
+            "Found a problem, or have an idea? Tell us here. It goes straight to the developer."
+        } else {
+            "Found a problem, or have an idea? Write it here and save it as a file to send to the developer."
+        });
         if crate::update::is_prerelease() {
             ui.label(RichText::new("You're on a test version, so every report really helps.").color(Color32::from_rgb(255, 190, 90)));
         }
@@ -393,10 +397,10 @@ impl Feedback {
                     }
                 }
                 None => {
-                    ui.label(RichText::new("This build can't send directly; save the report and send the file to the developer.").weak());
+                    ui.label(RichText::new("Press \"Save to Desktop\", then send that file to whoever gave you hyprwin.").weak());
                 }
             }
-            if ui.button("Save to Desktop instead").clicked() {
+            if ui.button(if webhook().is_some() { "Save to Desktop instead" } else { "Save to Desktop" }).clicked() {
                 let report = build_report(self.include_titles);
                 self.result = Some(save_to_desktop(self.kind, &self.message, &self.name, &report).map(|p| {
                     reveal(&p);

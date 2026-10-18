@@ -529,7 +529,7 @@ fn main() {
         warn!("{crashes} problem report(s) saved since the last start");
     }
     if crashes > 0 && std::env::var_os("HYPRWIN_MANAGE_ONLY").is_none() {
-        tray::notify(main, "hyprwin hit a problem last time", "A report was saved. To help fix it, open hyprwin Settings › Feedback and press Send.");
+        tray::notify(main, "hyprwin hit a problem last time", "A report was saved. To help fix it, open hyprwin Settings › Feedback to send or save it.");
     }
     info!("ready");
 
