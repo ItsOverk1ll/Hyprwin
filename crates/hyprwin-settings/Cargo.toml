@@ -6,13 +6,20 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# Single-file installer: embeds the programs found in $HYPRWIN_BUNDLE_DIR
+# (scripts/package.ps1 sets it).
+bundle = []
+
 [dependencies]
 hyprwin-config.workspace = true
 hyprwin-ipc.workspace = true
 hyprwin-layout.workspace = true
+hyprwin-win32.workspace = true
 eframe = { version = "=0.36.2", default-features = false, features = ["default_fonts", "glow"] }
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 serde_json = "1.0"
+windows.workspace = true
 
 [build-dependencies]
 embed-resource = "3.0"

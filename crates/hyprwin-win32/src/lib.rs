@@ -6,6 +6,7 @@
 
 pub mod clock;
 pub mod cloak;
+pub mod crash;
 pub mod dpi;
 pub mod dwm;
 pub mod ghost;

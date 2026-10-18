@@ -477,6 +477,8 @@ fn main() {
     // Panic: restore everything before the process dies.
     std::panic::set_hook(Box::new(|info| {
         log::write(log::ERROR, format_args!("PANIC: {info}"));
+        let bt = std::backtrace::Backtrace::force_capture();
+        hyprwin_win32::crash::write_report("crash", &format!("hyprwin crashed: {info}\n\nthread: {}\n\nbacktrace:\n{bt}", std::thread::current().name().unwrap_or("?")));
         if let Some(mut l) = Ledger::load() {
             l.restore_all();
             let _ = l.save();
@@ -522,6 +524,13 @@ fn main() {
     hyprwin_config::themes::install_builtins();
     tray::add(main, false);
     tray::welcome_once(main);
+    let crashes = hyprwin_win32::crash::new_since_last_check();
+    if crashes > 0 {
+        warn!("{crashes} problem report(s) saved since the last start");
+    }
+    if crashes > 0 && std::env::var_os("HYPRWIN_MANAGE_ONLY").is_none() {
+        tray::notify(main, "hyprwin hit a problem last time", "A report was saved. To help fix it, open hyprwin Settings › Feedback and press Send.");
+    }
     info!("ready");
 
     let mut msg = MSG::default();

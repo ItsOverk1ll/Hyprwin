@@ -6,6 +6,7 @@
 #![windows_subsystem = "windows"]
 
 mod daemon;
+mod feedback;
 mod keybinds_ui;
 mod setup;
 mod setup_ui;
@@ -14,7 +15,7 @@ mod update;
 
 use eframe::egui;
 
-static TASKBAR_ICO: &[u8] = include_bytes!("../../../assets/icons/taskbar_icon.ico");
+pub(crate) static TASKBAR_ICO: &[u8] = include_bytes!("../../../assets/icons/taskbar_icon.ico");
 
 fn window_icon() -> Option<egui::IconData> {
     let img = image::load_from_memory_with_format(TASKBAR_ICO, image::ImageFormat::Ico).ok()?.into_rgba8();
@@ -72,7 +73,8 @@ fn main() -> eframe::Result {
             }
         });
     }
-    // Setup mode: run as hyprwin-setup.exe, or with --setup / --install / --uninstall.
+    // Setup mode: run as hyprwin-setup.exe (or the single-file installer under any name),
+    // or with --setup / --install / --uninstall.
     let exe_name = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())).unwrap_or_default();
     let quiet = args.iter().any(|a| a == "--quiet");
     let uninstall = args.iter().any(|a| a == "--uninstall");
@@ -81,12 +83,15 @@ fn main() -> eframe::Result {
         let r = if uninstall {
             setup::uninstall(args.iter().any(|a| a == "--purge"))
         } else {
-            setup::install(&setup::InstallOptions { autostart: args.iter().any(|a| a == "--autostart") })
+            setup::install(&setup::InstallOptions {
+                autostart: args.iter().any(|a| a == "--autostart"),
+                dir: args.iter().position(|a| a == "--dir").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from),
+            })
         };
         std::process::exit(if r.is_ok() { 0 } else { 1 });
     }
-    if uninstall || install || args.iter().any(|a| a == "--setup") || exe_name.contains("setup") {
-        let mut viewport = egui::ViewportBuilder::default().with_title(setup_ui::TITLE).with_inner_size([640.0, 520.0]).with_resizable(false);
+    if uninstall || install || args.iter().any(|a| a == "--setup") || exe_name.contains("setup") || setup::is_bundle() {
+        let mut viewport = egui::ViewportBuilder::default().with_title(setup_ui::TITLE).with_inner_size([700.0, 720.0]).with_min_inner_size([560.0, 560.0]);
         if let Some(icon) = window_icon() {
             viewport = viewport.with_icon(icon);
         }

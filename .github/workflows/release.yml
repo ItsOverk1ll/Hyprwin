@@ -1,7 +1,12 @@
 # Publishes a release when a version tag is pushed:
 #   (bump `version` in Cargo.toml, commit)  git tag v0.3.0 && git push origin v0.3.0
-# Builds the installer zip with scripts/package.ps1 and attaches it. If a
-# release for the tag already exists, the zip is (re)uploaded to it.
+# Builds the single-file installer and the zip with scripts/package.ps1 and
+# attaches both. A tag with a suffix (v0.4.0-beta.1) is published as a
+# pre-release, which the stable app's update check ignores. Notes come from
+# .github/release-notes/<tag>.md when it exists. If a release for the tag
+# already exists, the files are (re)uploaded to it.
+# The Settings Feedback tab sends to the Discord webhook in the
+# HYPRWIN_FEEDBACK_WEBHOOK repository secret (optional).
 name: Release
 
 on:
@@ -37,17 +42,24 @@ jobs:
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Unit tests
         run: cargo test --workspace
-      - name: Build installer zip
+      - name: Build installer and zip
         shell: pwsh
+        env:
+          HYPRWIN_FEEDBACK_WEBHOOK: ${{ secrets.HYPRWIN_FEEDBACK_WEBHOOK }}
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package.ps1
       - name: Publish release
         shell: pwsh
         run: |
-          $zip = "dist\hyprwin-$env:VERSION-windows-x64.zip"
-          if (-not (Test-Path $zip)) { throw "missing $zip" }
+          $files = "dist\hyprwin-$env:VERSION-setup.exe", "dist\hyprwin-$env:VERSION-windows-x64.zip"
+          foreach ($f in $files) { if (-not (Test-Path $f)) { throw "missing $f" } }
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:TAG $zip --clobber
+            gh release upload $env:TAG @files --clobber
           } else {
-            gh release create $env:TAG $zip --title "hyprwin $env:VERSION" --generate-notes
+            $beta = $env:VERSION -match '-'
+            $opts = @('--title', $(if ($beta) { "hyprwin $env:VERSION (beta, test version)" } else { "hyprwin $env:VERSION" }))
+            $notes = ".github\release-notes\$env:TAG.md"
+            if (Test-Path $notes) { $opts += @('--notes-file', $notes) } else { $opts += '--generate-notes' }
+            if ($beta) { $opts += '--prerelease' }
+            gh release create $env:TAG @files @opts
           }

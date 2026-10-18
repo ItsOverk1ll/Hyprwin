@@ -11,7 +11,8 @@
 use hyprwin_win32::ledger::Ledger;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
-    CreateMutexW, OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    CreateMutexW, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -58,7 +59,7 @@ fn main() {
     }
     hyprwin_win32::com_init();
     let pid: u32 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let daemon: HANDLE = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, false, pid) }.unwrap_or_default();
+    let daemon: HANDLE = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.unwrap_or_default();
     if daemon.is_invalid() {
         log(&format!("cannot open daemon pid {pid}; exiting"));
         return;
@@ -74,7 +75,19 @@ fn main() {
     loop {
         let r = unsafe { MsgWaitForMultipleObjects(Some(&[daemon]), false, u32::MAX, QS_ALLINPUT) };
         if r == WAIT_OBJECT_0 {
+            let mut code = 0u32;
+            let _ = unsafe { GetExitCodeProcess(daemon, &mut code) };
             restore("daemon exited", pid);
+            // 0 is a normal exit and 101 a panic (the daemon wrote that report
+            // itself). Anything else: killed, or crashed hard (no panic hook).
+            let just_reported = hyprwin_win32::crash::reports().first().and_then(|p| p.metadata().ok()?.modified().ok()?.elapsed().ok()).is_some_and(|age| age.as_secs() < 10);
+            if code != 0 && code != 101 && !just_reported {
+                log(&format!("daemon pid {pid} stopped unexpectedly (exit code {code:#x})"));
+                hyprwin_win32::crash::write_report(
+                    "stopped unexpectedly",
+                    &format!("hyprwin (pid {pid}) stopped without shutting down normally.\nexit code: {code} ({code:#x})\n\nCommon codes: 0xc0000005 = crashed (access violation), 0xc00000fd = stack overflow, 1 = ended by Task Manager or another program."),
+                );
+            }
             break;
         }
         let mut msg = MSG::default();
@@ -89,6 +102,7 @@ fn main() {
         }
         if emergency {
             log("EMERGENCY combo pressed");
+            hyprwin_win32::crash::write_report("emergency key", "The emergency key (Ctrl+Alt+Shift+Win+Esc) was pressed: something was probably wrong. The log below shows what hyprwin was doing just before.");
             unsafe {
                 let _ = TerminateProcess(daemon, 2);
             }

@@ -74,7 +74,8 @@ fn data(main: HWND, paused: bool) -> NOTIFYICONDATAW {
         hIcon: tray_icon(small_icon_size()),
         ..Default::default()
     };
-    let tip = if paused { "hyprwin — paused" } else { "hyprwin — tiling" };
+    let beta = if env!("CARGO_PKG_VERSION").contains('-') { " (beta)" } else { "" };
+    let tip = format!("hyprwin{beta} — {}", if paused { "paused" } else { "tiling" });
     for (i, c) in tip.encode_utf16().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }

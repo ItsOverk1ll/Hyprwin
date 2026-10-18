@@ -9,4 +9,6 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=app.rc");
+    println!("cargo:rerun-if-env-changed=HYPRWIN_BUNDLE_DIR");
+    println!("cargo:rerun-if-env-changed=HYPRWIN_FEEDBACK_WEBHOOK");
 }

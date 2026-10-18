@@ -16,6 +16,7 @@ enum Tab {
     Themes,
     Groups,
     Keybinds,
+    Feedback,
     About,
 }
 
@@ -153,6 +154,7 @@ pub struct SettingsApp {
     new_group: String,
     focus_new_group: bool,
     keybinds: crate::keybinds_ui::KeybindEditor,
+    feedback: crate::feedback::Feedback,
     start_with_windows: bool,
     toast: Option<(String, Instant, bool)>,
     update_rx: Option<std::sync::mpsc::Receiver<crate::update::Outcome>>,
@@ -206,6 +208,7 @@ impl SettingsApp {
                 "themes" => Tab::Themes,
                 "groups" => Tab::Groups,
                 "keybinds" => Tab::Keybinds,
+                "feedback" => Tab::Feedback,
                 "about" => Tab::About,
                 _ => Tab::Settings,
             },
@@ -220,6 +223,7 @@ impl SettingsApp {
             new_group: String::new(),
             focus_new_group: save,
             keybinds: Default::default(),
+            feedback: Default::default(),
             start_with_windows: starts_with_windows(),
             toast: None,
             update_rx: None,
@@ -325,6 +329,7 @@ impl SettingsApp {
             (Tab::Themes, "🎨  Themes"),
             (Tab::Groups, "🗐  App Groups"),
             (Tab::Keybinds, "⌨  Keybinds"),
+            (Tab::Feedback, "💬  Feedback"),
             (Tab::About, "ℹ  About"),
         ] {
             let selected = self.tab == tab;
@@ -627,6 +632,9 @@ impl SettingsApp {
     fn about_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("About hyprwin");
         ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+        if crate::update::is_prerelease() {
+            ui.colored_label(egui::Color32::from_rgb(255, 190, 90), "Test version (beta): not the stable release. Please report anything odd in the Feedback tab.");
+        }
         ui.label("Hyprland-style tiling for Windows 11.");
         ui.add_space(10.0);
         section(ui, "Updates", |ui| {
@@ -805,6 +813,7 @@ impl eframe::App for SettingsApp {
                     Tab::Themes => self.themes_tab(ui),
                     Tab::Groups => self.groups_tab(ui),
                     Tab::Keybinds => self.keybinds_tab(ui),
+                    Tab::Feedback => self.feedback.show(ui),
                     Tab::About => self.about_tab(ui),
                 }
             });
