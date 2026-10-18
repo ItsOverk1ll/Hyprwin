@@ -65,7 +65,7 @@ checksum = "fc7eb209b1518d6bb87b283c20095f5228ecda460da70b44f0802523dea6da04"
 
 [[package]]
 name = "animation-spike"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "hyprwin-anim",
  "hyprwin-win32",
@@ -858,7 +858,7 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hyprwin"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -874,11 +874,11 @@ dependencies = [
 
 [[package]]
 name = "hyprwin-anim"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 
 [[package]]
 name = "hyprwin-config"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "hyprwin-anim",
  "hyprwin-layout",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "hyprwin-guard"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "embed-manifest",
  "hyprwin-win32",
@@ -897,14 +897,14 @@ dependencies = [
 
 [[package]]
 name = "hyprwin-ipc"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "hyprwin-layout"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "hyprwin-anim",
  "serde_json",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "hyprwin-settings"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "eframe",
  "embed-manifest",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "hyprwin-win32"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "hyprwin-anim",
  "serde_json",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "hyprwinctl"
-version = "0.4.0-beta.2"
+version = "0.4.0-beta.3"
 dependencies = [
  "hyprwin-ipc",
 ]

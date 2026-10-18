@@ -2208,6 +2208,28 @@ mod tests {
     }
 
     #[test]
+    fn a_tile_dragged_to_another_monitor_joins_its_workspace() {
+        let mut wm = Wm::new(WmConfig::default(), vec![mon("A", 0), mon("B", 1920), mon("C", 3840)]);
+        wm.add_window(1, tiled(Rect::new(100, 100, 300, 300)));
+        wm.add_window(2, tiled(Rect::new(200, 100, 300, 300)));
+        wm.add_window(3, tiled(Rect::new(4000, 100, 300, 300)));
+        assert_eq!((wm.windows[&1].ws, wm.windows[&2].ws, wm.windows[&3].ws), (1, 1, 3));
+        // Onto the empty middle monitor: it fills monitor B.
+        wm.on_user_move(2, Rect::new(2000, 100, 900, 1000), (2500.0, 500.0));
+        assert_eq!(wm.windows[&2].ws, 2);
+        let r = wm.desired_rect(2).unwrap();
+        assert!(r.x >= 1920 && r.right() <= 3840, "{r:?}");
+        assert_eq!(wm.desired_rect(1).unwrap().w, wm.desired_rect(2).unwrap().w, "monitor A is left with one full tile");
+        // Onto the right half of the tile on the third monitor: they share it.
+        let t = wm.desired_rect(3).unwrap();
+        wm.on_user_move(1, Rect::new(4500, 100, 900, 1000), (t.right() as f64 - 50.0, t.center().1));
+        assert_eq!(wm.windows[&1].ws, 3);
+        let (a, b) = (wm.desired_rect(3).unwrap(), wm.desired_rect(1).unwrap());
+        assert!(a.right() <= b.x && b.right() <= 5760, "{a:?} {b:?}");
+        assert_eq!(wm.focus, Some(1));
+    }
+
+    #[test]
     fn monitor_unplug_keeps_windows() {
         let mut wm = Wm::new(WmConfig::default(), vec![mon("A", 0), mon("B", 1920)]);
         wm.add_window(1, tiled(Rect::new(2100, 100, 300, 300)));

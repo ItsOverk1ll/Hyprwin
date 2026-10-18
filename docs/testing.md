@@ -15,6 +15,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\taskbar.ps1      
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\border.ps1                   # drawn gradient border: colours, width, follows focus/swaps, hidden in fullscreen/empty ws/pause
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\leak.ps1                     # 40 swaps, 10 workspace trips, 6 animated closes: handles, GDI/USER objects, memory stable
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\keybinds.ps1                 # keybind edits reach the daemon, a new bind really fires, bad input refused, config untouched
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\drag.ps1                     # title-bar drag drops a tile next to another; edge drag resizes (cross-monitor drops: unit tests)
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\live\setup.ps1                    # packaged zip: install, update, uninstall (sandboxed; run scripts\package.ps1 first)
 .\target\release\animation-spike.exe selftest                                                # 22 animation/DWM checks
 powershell -NoProfile -ExecutionPolicy Bypass -File spikes\win-api-probe\probe.ps1           # re-run on every Windows feature update

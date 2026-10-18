@@ -1119,10 +1119,11 @@ impl App {
                     if desired.is_some_and(|d| !near(d, r)) {
                         let d = desired.unwrap();
                         let (cx, cy) = cursor_pos();
-                        let fx = if (r.w - d.w).abs() > 4 || (r.h - d.h).abs() > 4 {
-                            self.wm.on_user_resize(id, r)
-                        } else {
-                            self.wm.on_user_move(id, r, (cx as f64, cy as f64))
+                        let home = self.wm.windows.get(&id).and_then(|w| self.wm.workspaces.get(&w.ws)).map(|ws| ws.monitor);
+                        let other_monitor = self.wm.monitor_at(cx as f64, cy as f64).is_some_and(|m| Some(m) != home);
+                        let fx = match drop_kind(d, r, other_monitor) {
+                            DropKind::Resize => self.wm.on_user_resize(id, r),
+                            DropKind::Move => self.wm.on_user_move(id, r, (cx as f64, cy as f64)),
                         };
                         self.apply(fx);
                     }
@@ -1861,6 +1862,20 @@ fn manage_only() -> Option<&'static regex::Regex> {
     RE.get_or_init(|| std::env::var("HYPRWIN_MANAGE_ONLY").ok().and_then(|v| regex::Regex::new(&v).ok())).as_ref()
 }
 
+#[derive(Debug, PartialEq)]
+enum DropKind {
+    Move,
+    Resize,
+}
+
+/// What a finished title-bar / border drag (`desired` → `actual`) was. A drop
+/// on another monitor is always a move: crossing to a monitor with another
+/// scale makes Windows resize the window on the way, which must not be
+/// mistaken for the user resizing the tile (it would snap back).
+fn drop_kind(desired: Rect, actual: Rect, other_monitor: bool) -> DropKind {
+    if !other_monitor && ((actual.w - desired.w).abs() > 4 || (actual.h - desired.h).abs() > 4) { DropKind::Resize } else { DropKind::Move }
+}
+
 fn near(a: Rect, b: Rect) -> bool {
     (a.x - b.x).abs() <= 1 && (a.y - b.y).abs() <= 1 && (a.w - b.w).abs() <= 1 && (a.h - b.h).abs() <= 1
 }
@@ -1875,4 +1890,19 @@ pub fn cursor_pos() -> (i32, i32) {
         let _ = GetCursorPos(&mut p);
     }
     (p.x, p.y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drops_on_another_monitor_are_moves_even_when_rescaled() {
+        let tile = Rect::new(0, 0, 1000, 800);
+        // Same monitor: a size change is the user resizing; same size is a move.
+        assert_eq!(drop_kind(tile, Rect::new(0, 0, 1200, 800), false), DropKind::Resize);
+        assert_eq!(drop_kind(tile, Rect::new(300, 50, 1000, 800), false), DropKind::Move);
+        // Another monitor at 150 %: Windows rescaled it on the way. Still a move.
+        assert_eq!(drop_kind(tile, Rect::new(2500, 100, 1500, 1200), true), DropKind::Move);
+    }
 }
