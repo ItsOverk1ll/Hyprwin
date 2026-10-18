@@ -181,21 +181,27 @@ impl App {
             deadline: Instant::now() + OPEN_TIMEOUT,
         };
         // Reuse open windows of the same app (single-window apps like Discord
-        // or Spotify would not open a second window anyway).
+        // or Spotify would not open a second window anyway). With several
+        // windows of one app, a window whose title matches a slot's saved
+        // title goes to that slot first, so two browser windows don't trade
+        // places; the rest are handed out in a stable order.
         let mut claimed: Vec<WinId> = Vec::new();
         let mut launched = 0;
+        let mut open: Vec<WinId> = self.wm.windows.values().filter(|w| !w.minimized).map(|w| w.id).collect();
+        open.sort();
+        let matches = |id: &WinId, app: &GroupApp, by_title: bool| self.meta.get(id).is_some_and(|m| m.class == app.class && (!by_title || m.title == app.title));
+        let mut picks: Vec<Option<WinId>> = vec![None; pg.apps.len()];
+        for by_title in [true, false] {
+            for (i, app) in pg.apps.iter().enumerate() {
+                if picks[i].is_none() {
+                    picks[i] = open.iter().copied().find(|id| !claimed.contains(id) && matches(id, app, by_title));
+                    claimed.extend(picks[i]);
+                }
+            }
+        }
         for i in 0..pg.apps.len() {
-            let class = pg.apps[i].class.clone();
-            let existing = self
-                .wm
-                .windows
-                .values()
-                .filter(|w| !w.minimized && !claimed.contains(&w.id))
-                .map(|w| w.id)
-                .find(|id| self.meta.get(id).is_some_and(|m| m.class == class));
-            match existing {
+            match picks[i] {
                 Some(id) => {
-                    claimed.push(id);
                     pg.slots[i] = Some(id);
                     let fx = self.wm.move_to_workspace(Some(id), &WsSel::Id(ws), false);
                     self.apply(fx);
